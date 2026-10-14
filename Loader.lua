@@ -1,8 +1,8 @@
---[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — ULTIMATE STEALTH
-     Modes: walk, fly, tp, tween, velocity, netown, lerp
-     Extra: Anti-Cheat Bypass, Anti-Detect, GUI Protection
+--[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — ULTIMATE FINAL
+     Modes: walk (pathfinding), fly, tween, lerp
+     Anti-Detect: Kick/Remote/Script blocker + Movement monitor (aktif saat collect)
 ]]
-print("[Oc1DvHUB] Loading ULTIMATE STEALTH...")
+print("[Oc1DvHUB] Loading ULTIMATE FINAL...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -11,6 +11,7 @@ local TS = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local Stats = game:GetService("Stats")
 local MPS = game:GetService("MarketplaceService")
+local PathfindingService = game:GetService("PathfindingService")
 local LP = Players.LocalPlayer
 
 local CONFIG = {
@@ -42,7 +43,6 @@ local C = {
     Cyn = Color3.fromRGB(110, 200, 245),
     Pur = Color3.fromRGB(191, 90, 242),
     Orng = Color3.fromRGB(255, 165, 0),
-    Stroke = Color3.fromRGB(255,255,255),
 }
 
 local S = {
@@ -89,110 +89,6 @@ end
 local NotifyUser, Log
 
 -- ═══════════════════════════════════════════════════════════
--- ANTI-DETECT & ANTI-CHEAT BYPASS
--- ═══════════════════════════════════════════════════════════
-local AntiDetect = {
-    Enabled = true,
-    ScriptsDisabled = 0,
-    KicksBlocked = 0,
-    RemotesBlocked = 0,
-}
-
-local DETECT_KEYWORDS = {
-    "detect", "anticheat", "anti_cheat", "ac_", "acscript",
-    "log", "report", "flag", "ban", "kick", "admin",
-    "cheat", "hack", "exploit", "suspicious",
-    "monitor", "watch", "sentry", "guardian",
-}
-
-local function isDetectionName(name)
-    local low = tostring(name):lower()
-    for _, kw in ipairs(DETECT_KEYWORDS) do
-        if low:find(kw, 1, true) then return true end
-    end
-    return false
-end
-
--- Hook Kick
-pcall(function()
-    if type(hookfunction) == "function" then
-        local oldKick = hookfunction(LP.Kick, function(self, ...)
-            if self == LP and AntiDetect.Enabled then
-                AntiDetect.KicksBlocked += 1
-                return
-            end
-            return oldKick(self, ...)
-        end)
-    end
-end)
-
--- Hook namecall untuk blok deteksi
-pcall(function()
-    if type(hookmetamethod) == "function" then
-        local old
-        old = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod()
-            if AntiDetect.Enabled then
-                if method == "Kick" and self == LP then
-                    AntiDetect.KicksBlocked += 1
-                    return
-                end
-                if method == "FireServer" or method == "InvokeServer" then
-                    local ok, name = pcall(function() return self:GetFullName() end)
-                    if ok and isDetectionName(name) then
-                        AntiDetect.RemotesBlocked += 1
-                        return
-                    end
-                end
-            end
-            return old(self, ...)
-        end)
-    end
-end)
-
--- Disable LocalScript deteksi
-local function disableDetectionScripts(parent)
-    if not AntiDetect.Enabled then return end
-    for _, obj in ipairs(parent:GetDescendants()) do
-        if obj:IsA("LocalScript") and isDetectionName(obj.Name) then
-            pcall(function()
-                obj.Disabled = true
-                AntiDetect.ScriptsDisabled += 1
-            end)
-        end
-    end
-end
-
-task.spawn(function()
-    while true do
-        task.wait(3)
-        if AntiDetect.Enabled then
-            pcall(function() disableDetectionScripts(LP) end)
-            pcall(function() disableDetectionScripts(pg) end)
-        end
-    end
-end)
-
-LP.DescendantAdded:Connect(function(obj)
-    if AntiDetect.Enabled and obj:IsA("LocalScript") and isDetectionName(obj.Name) then
-        task.wait(0.1)
-        pcall(function() obj.Disabled = true end)
-    end
-end)
-
--- Protect GUI
-local function protectGui(gui)
-    pcall(function()
-        if syn and syn.protect_gui then syn.protect_gui(gui) end
-        if protect_gui then protect_gui(gui) end
-        if gethui then
-            local hui = gethui()
-            if hui then gui.Parent = hui end
-        end
-    end)
-end
-
--- ═══════════════════════════════════════════════════════════
 -- STATE
 -- ═══════════════════════════════════════════════════════════
 local State = {
@@ -202,9 +98,8 @@ local State = {
     MaxDistance = 500,
     MaxPerCycle = 5,
     WalkSpeed = 32,
-    TweenDuration = 0.4,
-    VelocitySpeed = 120,
-    LerpSteps = 10,
+    TweenDuration = 1.0,
+    LerpSteps = 20,
     LerpStepDelay = 0.02,
 
     AutoCollectPumpkin = true,
@@ -226,7 +121,6 @@ local State = {
     Fly = false, FlySpeed = 80, FlyKey = Enum.KeyCode.F,
 
     WalkSpeedEnabled = false, WalkSpeedValue = 16,
-    AntiDetectEnabled = true,
 }
 
 local StatsData = {
@@ -315,7 +209,6 @@ pcall(function()
     LP.Idled:Connect(function() if State.AntiAFK then doAntiAFK() end end)
 end)
 
--- Invisible + Noclip loop
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -341,33 +234,26 @@ task.spawn(function()
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- FLY MODE
--- ═══════════════════════════════════════════════════════════
+-- FLY
 local flyBV, flyBG, flyConn
-
 local function stopFly()
     if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
     if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
     if flyConn then pcall(function() flyConn:Disconnect() end) flyConn = nil end
 end
-
 local function startFly()
     stopFly()
     if not hasCharacter() then return end
     local hrp, hum = getHRP(), getHum()
     if not hrp or not hum then return end
-
     flyBV = Instance.new("BodyVelocity")
     flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
     flyBV.Velocity = Vector3.zero
     flyBV.Parent = hrp
-
     flyBG = Instance.new("BodyGyro")
     flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
     flyBG.P = 9e4; flyBG.D = 500; flyBG.CFrame = hrp.CFrame
     flyBG.Parent = hrp
-
     flyConn = RunService.RenderStepped:Connect(function()
         if not State.Fly or not hasCharacter() then return end
         local h, hm = getHRP(), getHum()
@@ -381,7 +267,6 @@ local function startFly()
         flyBG.CFrame = workspace.CurrentCamera.CFrame
     end)
 end
-
 UIS.InputBegan:Connect(function(i, g)
     if g then return end
     if i.KeyCode == State.FlyKey then
@@ -390,10 +275,143 @@ UIS.InputBegan:Connect(function(i, g)
         NotifyUser("Fly", State.Fly and "ON" or "OFF", State.Fly and "success" or "info")
     end
 end)
-
 LP.CharacterAdded:Connect(function()
     task.wait(1)
     if State.Fly then startFly() end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- ANTI-DETECT SYSTEM
+-- ═══════════════════════════════════════════════════════════
+local AntiDetect = {
+    Enabled = true,
+    Running = false,           -- aktif saat collect berjalan
+    ScriptsDisabled = 0,
+    KicksBlocked = 0,
+    RemotesBlocked = 0,
+    MovementBlocked = 0,
+    MaxTPDistance = 40,
+    MaxSpeed = 60,
+    lastPos = nil,
+    lastTime = nil,
+}
+
+local DETECT_KEYWORDS = {
+    "detect","anticheat","anti_cheat","ac_","acscript","log","report",
+    "flag","ban","kick","admin","cheat","hack","exploit","suspicious",
+    "monitor","watch","sentry","guardian","speedcheck","positioncheck",
+}
+
+local function isDetectionName(name)
+    local low = tostring(name):lower()
+    for _, kw in ipairs(DETECT_KEYWORDS) do
+        if low:find(kw, 1, true) then return true end
+    end
+    return false
+end
+
+-- Hook Kick
+pcall(function()
+    if type(hookfunction) == "function" then
+        hookfunction(LP.Kick, function(self, ...)
+            if self == LP and AntiDetect.Enabled then
+                AntiDetect.KicksBlocked += 1
+                return
+            end
+        end)
+    end
+end)
+
+-- Hook namecall (Kick + Remote deteksi)
+pcall(function()
+    if type(hookmetamethod) == "function" then
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            if AntiDetect.Enabled then
+                if method == "Kick" and self == LP then
+                    AntiDetect.KicksBlocked += 1
+                    return
+                end
+                if method == "FireServer" or method == "InvokeServer" then
+                    local ok, name = pcall(function() return self:GetFullName() end)
+                    if ok and isDetectionName(name) then
+                        AntiDetect.RemotesBlocked += 1
+                        return
+                    end
+                end
+            end
+            return old(self, ...)
+        end)
+    end
+end)
+
+-- Disable LocalScript deteksi
+local function disableDetectionScripts(parent)
+    if not AntiDetect.Enabled then return end
+    for _, obj in ipairs(parent:GetDescendants()) do
+        if obj:IsA("LocalScript") and isDetectionName(obj.Name) then
+            pcall(function()
+                obj.Disabled = true
+                AntiDetect.ScriptsDisabled += 1
+            end)
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(3)
+        if AntiDetect.Enabled then
+            pcall(function() disableDetectionScripts(LP) end)
+            pcall(function() disableDetectionScripts(pg) end)
+        end
+    end
+end)
+
+LP.DescendantAdded:Connect(function(obj)
+    if AntiDetect.Enabled and obj:IsA("LocalScript") and isDetectionName(obj.Name) then
+        task.wait(0.1)
+        pcall(function() obj.Disabled = true end)
+    end
+end)
+
+-- MOVEMENT ANTI-DETECT (aktif saat collect)
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+        if not AntiDetect.Enabled or not AntiDetect.Running or not hasCharacter() then
+            AntiDetect.lastPos = nil
+            AntiDetect.lastTime = nil
+            continue
+        end
+        local hrp = getHRP()
+        if not hrp then continue end
+        local now = tick()
+        local pos = hrp.Position
+
+        if AntiDetect.lastPos and AntiDetect.lastTime then
+            local deltaDist = (pos - AntiDetect.lastPos).Magnitude
+            local deltaTime = now - AntiDetect.lastTime
+            local speed = deltaTime > 0 and (deltaDist / deltaTime) or 0
+
+            if deltaDist > AntiDetect.MaxTPDistance then
+                AntiDetect.MovementBlocked += 1
+                pcall(function() hrp.CFrame = CFrame.new(AntiDetect.lastPos) end)
+            elseif not State.Fly and speed > AntiDetect.MaxSpeed then
+                AntiDetect.MovementBlocked += 1
+                pcall(function() hrp.CFrame = CFrame.new(AntiDetect.lastPos) end)
+            end
+        end
+        AntiDetect.lastPos = hrp.Position
+        AntiDetect.lastTime = now
+    end
+end)
+
+-- Protect GUI
+pcall(function()
+    if syn and syn.protect_gui then syn.protect_gui(pg) end
+    if protect_gui then protect_gui(pg) end
 end)
 
 -- ═══════════════════════════════════════════════════════════
@@ -526,28 +544,80 @@ end
 -- ═══════════════════════════════════════════════════════════
 -- MOVEMENT METHODS
 -- ═══════════════════════════════════════════════════════════
+
+-- Walk pakai Pathfinding (hindari tembok)
 local function walkToTarget(targetPart, timeout)
-    timeout = timeout or 5
+    timeout = timeout or 8
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
     local hrp, hum = getHRP(), getHum()
     if not hrp or not hum then return false end
+
     local oldSpeed = hum.WalkSpeed
     hum.WalkSpeed = State.WalkSpeed
-    local startTime = tick()
+
     local success = false
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        local dir = (targetPart.Position - h.Position) * Vector3.new(1, 0, 1)
-        local dist = dir.Magnitude
-        if dist < 3 then success = true; break end
-        dir = dir.Unit
-        local goal = h.Position + dir * math.min(dist, 8)
-        pcall(function() hum:MoveTo(goal) end)
-        task.wait(0.1)
+    local startTime = tick()
+
+    -- Pathfinding
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentCanClimb = true,
+        WaypointSpacing = 4,
+    })
+
+    local ok = pcall(function()
+        path:ComputeAsync(hrp.Position, targetPart.Position)
+    end)
+
+    if ok and path.Status == Enum.PathStatus.Success then
+        local waypoints = path:GetWaypoints()
+        for _, wp in ipairs(waypoints) do
+            if tick() - startTime > timeout then break end
+            if not hasCharacter() or not targetPart.Parent then break end
+            local h = getHRP()
+            if not h then break end
+
+            if wp.Action == Enum.PathWaypointAction.Jump then
+                pcall(function() hum.Jump = true end)
+            end
+
+            pcall(function() hum:MoveTo(wp.Position) end)
+
+            local wpTimeout = tick()
+            while (getHRP().Position - wp.Position).Magnitude > 3 do
+                if tick() - wpTimeout > 2 then break end
+                if not hasCharacter() then break end
+                task.wait(0.05)
+            end
+            task.wait(0.05)
+        end
+        if hasCharacter() then
+            success = (getHRP().Position - targetPart.Position).Magnitude < 8
+        end
     end
-    pcall(function() hum:MoveTo(hrp.Position) end)
+
+    -- Fallback MoveTo langsung
+    if not success then
+        local fbStart = tick()
+        while tick() - fbStart < timeout do
+            if not hasCharacter() or not targetPart.Parent then break end
+            local h = getHRP()
+            if not h then break end
+            local dir = (targetPart.Position - h.Position) * Vector3.new(1, 0, 1)
+            local dist = dir.Magnitude
+            if dist < 3 then success = true; break end
+            dir = dir.Unit
+            local goal = h.Position + dir * math.min(dist, 8)
+            pcall(function() hum:MoveTo(goal) end)
+            task.wait(0.1)
+        end
+    end
+
+    if hasCharacter() then
+        pcall(function() hum:MoveTo(getHRP().Position) end)
+    end
     hum.WalkSpeed = oldSpeed
     return success
 end
@@ -572,7 +642,7 @@ local function flyToTarget(targetPart, timeout)
 end
 
 local function tweenToTarget(targetPart, timeout)
-    timeout = timeout or 5
+    timeout = timeout or 8
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
     local hrp = getHRP()
     if not hrp then return false end
@@ -587,52 +657,8 @@ local function tweenToTarget(targetPart, timeout)
     return true
 end
 
-local function velocityToTarget(targetPart, timeout)
-    timeout = timeout or 5
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp = getHRP()
-    if not hrp then return false end
-
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    bv.Parent = hrp
-
-    local startTime = tick()
-    local success = false
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        local diff = targetPart.Position - h.Position
-        local dist = diff.Magnitude
-        if dist < 5 then success = true; break end
-        if diff.Magnitude > 0 then
-            bv.Velocity = diff.Unit * State.VelocitySpeed
-        end
-        task.wait(0.05)
-    end
-
-    bv.Velocity = Vector3.zero
-    task.wait(0.05)
-    bv:Destroy()
-    return success
-end
-
-local function networkOwnTP(targetPart)
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp = getHRP()
-    if not hrp then return false end
-    -- Ambil network ownership supaya server tidak curiga
-    pcall(function() targetPart:SetNetworkOwner(LP) end)
-    pcall(function() hrp:SetNetworkOwner(LP) end)
-    task.wait(0.1)
-    safeTP(targetPart.Position + Vector3.new(0, 3, 0))
-    task.wait(0.15)
-    return true
-end
-
 local function lerpToTarget(targetPart, timeout)
-    timeout = timeout or 5
+    timeout = timeout or 8
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
     local hrp = getHRP()
     if not hrp then return false end
@@ -650,9 +676,7 @@ local function lerpToTarget(targetPart, timeout)
     return true
 end
 
--- ═══════════════════════════════════════════════════════════
 -- GOD MODE / WALKSPEED
--- ═══════════════════════════════════════════════════════════
 task.spawn(function()
     while true do
         task.wait(0.3)
@@ -697,9 +721,7 @@ task.spawn(function()
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
 -- PROMPT HANDLER
--- ═══════════════════════════════════════════════════════════
 local function forceNoDelayPrompt(obj)
     if obj:IsA("ProximityPrompt") and State.NoDelay then
         pcall(function()
@@ -723,9 +745,7 @@ workspace.DescendantAdded:Connect(function(obj)
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
 -- COLLECT ITEM
--- ═══════════════════════════════════════════════════════════
 local function collectItem(data)
     if not data or not data.part or not data.part.Parent then return false end
     local part, model = data.part, data.model
@@ -759,13 +779,10 @@ local function collectItem(data)
             success = true
         end)
     end
-
     return success
 end
 
--- ═══════════════════════════════════════════════════════════
 -- ESP
--- ═══════════════════════════════════════════════════════════
 local function createHL(model, color, name)
     if not model or not model.Parent then return end
     local e = model:FindFirstChild(name)
@@ -829,28 +846,18 @@ local function removeESP(model)
     end
 end
 
--- ═══════════════════════════════════════════════════════════
 -- MODE DISPATCHER
--- ═══════════════════════════════════════════════════════════
 local function moveToTarget(part, dist)
     local mode = State.CollectMode
-    if mode == "tp" then
-        safeTP(part.Position + Vector3.new(0, 3, 0))
-        task.wait(0.3)
-        return true
-    elseif mode == "fly" then
+    if mode == "fly" then
         return flyToTarget(part, 5)
     elseif mode == "tween" then
-        return tweenToTarget(part, 5)
-    elseif mode == "velocity" then
-        return velocityToTarget(part, 5)
-    elseif mode == "netown" then
-        return networkOwnTP(part)
+        return tweenToTarget(part, 8)
     elseif mode == "lerp" then
-        return lerpToTarget(part, 5)
+        return lerpToTarget(part, 8)
     else -- walk
-        if dist <= 8 then return true end
-        return walkToTarget(part, 5)
+        if dist <= 5 then return true end
+        return walkToTarget(part, 8)
     end
 end
 
@@ -859,6 +866,7 @@ task.spawn(function()
     while true do
         task.wait(State.CollectInterval)
         if State.AutoCollect and hasCharacter() then
+            AntiDetect.Running = true
             local items = scanItems()
             if #items > 0 then
                 local hrp = getHRP()
@@ -883,6 +891,7 @@ task.spawn(function()
                     end
                 end
             end
+            AntiDetect.Running = false
         end
     end
 end)
@@ -891,6 +900,7 @@ task.spawn(function()
     while true do
         task.wait(State.PumpkinInterval)
         if State.AutoCollectPumpkin and hasCharacter() then
+            AntiDetect.Running = true
             local pumpkins = scanPumpkins()
             if #pumpkins > 0 then
                 local hrp = getHRP()
@@ -915,6 +925,7 @@ task.spawn(function()
                     end
                 end
             end
+            AntiDetect.Running = false
         end
     end
 end)
@@ -1107,7 +1118,6 @@ SG.Name = "Oc1DvHUB_UI"
 SG.ResetOnSpawn = false
 SG.IgnoreGuiInset = true
 SG.Parent = pg
-protectGui(SG)
 
 local NotifyContainer = Instance.new("Frame")
 NotifyContainer.Size = UDim2.new(0, 300, 0, 400)
@@ -1839,10 +1849,9 @@ end)
 -- FILL COLLECT
 local tcol = tabContent.COLLECT
 Sect(tcol, "MODE COLLECT")
-Dropdown(tcol, "Mode", {"walk", "fly", "tp", "tween", "velocity", "netown", "lerp"}, State.CollectMode, function(v)
+Dropdown(tcol, "Mode", {"walk", "fly", "tween", "lerp"}, State.CollectMode, function(v)
     State.CollectMode = v
-    local warn = (v == "tp" or v == "velocity") and "warn" or "success"
-    NotifyUser("Mode", "Set: " .. v, warn)
+    NotifyUser("Mode", "Set: " .. v, "success")
 end)
 
 Sect(tcol, "TREAT COLLECT")
@@ -1855,11 +1864,11 @@ Toggle(tcol, "Auto Collect Pumpkin", true, function(v) State.AutoCollectPumpkin 
 Slider(tcol, "Pumpkin Max Distance", 50, 2000, 500, function(v) State.PumpkinMaxDistance = v end)
 Slider(tcol, "Pumpkin Interval", 1, 10, 1.5, function(v) State.PumpkinInterval = v end)
 
-Sect(tcol, "TUNING MODE")
-Slider(tcol, "Walk Speed", 16, 100, 32, function(v) State.WalkSpeed = v end)
-Slider(tcol, "Tween Duration (x10)", 1, 20, 4, function(v) State.TweenDuration = v / 10 end)
-Slider(tcol, "Velocity Speed", 30, 500, 120, function(v) State.VelocitySpeed = v end)
-Slider(tcol, "Lerp Steps", 3, 30, 10, function(v) State.LerpSteps = v end)
+Sect(tcol, "TUNING")
+Slider(tcol, "Walk Speed", 16, 60, 32, function(v) State.WalkSpeed = v end)
+Slider(tcol, "Tween Duration (x10)", 5, 40, 10, function(v) State.TweenDuration = v / 10 end)
+Slider(tcol, "Lerp Steps", 5, 40, 20, function(v) State.LerpSteps = v end)
+Slider(tcol, "Lerp Step Delay (ms)", 10, 100, 20, function(v) State.LerpStepDelay = v / 1000 end)
 
 Sect(tcol, "METHOD")
 Toggle(tcol, "FirePrompt", true, function(v) State.FirePrompt = v end)
@@ -2025,6 +2034,7 @@ local statSpawnVal = mkStatRow(tEv, "Item Spawn", C.Pri)
 local statPumpkinColVal = mkStatRow(tEv, "Pumpkin Collected", C.Orng)
 local statPumpkinSpawnVal = mkStatRow(tEv, "Pumpkin Spawn", C.Yel)
 local statAntiDetect = mkStatRow(tEv, "Anti-Detect Block", C.Cyn)
+local statMoveBlock = mkStatRow(tEv, "Movement Block", C.Red)
 
 task.spawn(function()
     while SG.Parent do
@@ -2052,6 +2062,7 @@ task.spawn(function()
             statPumpkinColVal.Text = tostring(StatsData.PumpkinsCollected)
             statPumpkinSpawnVal.Text = tostring(StatsData.PumpkinsSpawned)
             statAntiDetect.Text = tostring(AntiDetect.KicksBlocked + AntiDetect.RemotesBlocked + AntiDetect.ScriptsDisabled)
+            statMoveBlock.Text = tostring(AntiDetect.MovementBlocked)
         end)
     end
 end)
@@ -2063,7 +2074,8 @@ Toggle(tm, "Enable Anti-Detect", true, function(v)
     AntiDetect.Enabled = v
     NotifyUser("Anti-Detect", v and "ON" or "OFF", v and "success" or "warn")
 end)
-Toggle(tm, "Block Kick", true, function(v) AntiDetect.Enabled = v end)
+Slider(tm, "Max TP Distance", 10, 200, 40, function(v) AntiDetect.MaxTPDistance = v end)
+Slider(tm, "Max Speed (stud/s)", 20, 200, 60, function(v) AntiDetect.MaxSpeed = v end)
 
 Sect(tm, "WALKSPEED")
 Toggle(tm, "Enable WalkSpeed", false, function(v)
@@ -2375,6 +2387,6 @@ UIS.InputBegan:Connect(function(i, g)
     end
 end)
 
-Log("Ultimate Stealth loaded", "success")
-NotifyUser("Oc1DvHUB", "Ultimate Stealth loaded!", "success")
-print("[Oc1DvHUB] Ultimate Stealth loaded ✅")
+Log("Ultimate Final loaded", "success")
+NotifyUser("Oc1DvHUB", "Ultimate Final loaded!", "success")
+print("[Oc1DvHUB] Ultimate Final loaded ✅")
