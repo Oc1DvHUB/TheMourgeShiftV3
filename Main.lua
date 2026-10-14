@@ -1,10 +1,8 @@
---[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — FINAL V4
-     Walk Natural: Noclip + Smooth Vertical (auto naik/turun ke target)
-     Collect V1 & V2, Pumpkin, ESP, Event, Misc, Tema, Credits
-     Full map scan, unlimited distance, anti-detect
-     Semua toggle default OFF
+--[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — FINAL V9
+     Fixed Statistics (Candy vs Pumpkin separated), Optimized, UI Bigger + Effects
+     Reliable Claim, Server Info, Clean Traffic Buttons
 ]]
-print("[Oc1DvHUB] Loading FINAL V4...")
+print("[Oc1DvHUB] Loading FINAL V9...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -50,7 +48,7 @@ local C = {
 local S = {
     StartTime = os.time(), GameName = "Loading...",
     curBG = 1, selBG = 1, HueColor = C.Pri,
-    BGBrightness = 0.55, MiniMode = true,
+    BGBrightness = 0.55, MiniMode = false,
 }
 
 local colorEls = {}
@@ -94,24 +92,22 @@ local NotifyUser, Log
 -- STATE
 -- ═══════════════════════════════════════════════════════════
 local State = {
-    CollectV1Enabled = false,
-    CollectMode = "walk",
-    CollectInterval = 2,
-    WalkSpeed = 32,
+    AutoCollectCandy = false,
+    CandyMethod = "walk",
+    CandyInterval = 2,
+    CandyWalkSpeed = 32,
+    CandyTimeout = 120,
 
-    CollectV2Enabled = false,
-    CollectV2Mode = "path",
-    CollectV2Interval = 2,
-    CollectV2WalkSpeed = 32,
-    CollectV2Timeout = 120,
-
-    PumpkinEnabled = false,
+    AutoCollectPumpkin = false,
+    PumpkinMethod = "walk",
     PumpkinInterval = 2,
 
-    -- WALK NATURAL
     WalkNaturalEnabled = false,
+    WalkVertMode = "tween",
     WalkVerticalSpeed = 30,
     WalkVerticalSmoothness = 0.05,
+    WalkTweenDuration = 0.5,
+    WalkTweenDelay = 0.1,
     WalkHorizontalRange = 25,
 
     ItemESP = false, PumpkinESP = false, ReaperESP = false, GhostESP = false,
@@ -131,15 +127,14 @@ local State = {
 }
 
 local StatsData = {
-    ItemsFound = 0, ItemsCollected = 0, ItemsSpawned = 0,
-    PumpkinsFound = 0, PumpkinsCollected = 0, PumpkinsSpawned = 0,
+    ItemsFound = 0, ItemsCollected = 0, ItemsAttempted = 0,
+    PumpkinsFound = 0, PumpkinsCollected = 0, PumpkinsAttempted = 0,
     ReapersFound = 0, GhostsFound = 0, AFKTicks = 0, DesyncCount = 0,
     VerticalSteps = 0,
 }
 
 local itemCache, pumpkinCache, reaperCache, ghostCache = {}, {}, {}, {}
 local countedItems, countedPumpkins = {}, {}
-local lastSeenItems, lastSeenPumpkins = {}, {}
 
 -- ═══════════════════════════════════════════════════════════
 -- HELPERS
@@ -253,18 +248,12 @@ end)
 
 -- ANTI-DETECT
 local AntiDetect = {
-    Enabled = true,
-    Running = false,
-    ScriptsDisabled = 0,
-    KicksBlocked = 0,
-    RemotesBlocked = 0,
-    MovementBlocked = 0,
-    MaxTPDistance = 80,
-    MaxSpeed = 100,
-    lastPos = nil,
-    lastTime = nil,
+    Enabled = true, Running = false,
+    ScriptsDisabled = 0, KicksBlocked = 0,
+    RemotesBlocked = 0, MovementBlocked = 0,
+    MaxTPDistance = 80, MaxSpeed = 100,
+    lastPos = nil, lastTime = nil,
 }
-
 local DETECT_KEYWORDS = {
     "detect","anticheat","anti_cheat","ac_","acscript","log","report",
     "flag","ban","kick","admin","cheat","hack","exploit","suspicious",
@@ -376,7 +365,7 @@ pcall(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- KEYWORDS + SCAN
+-- KEYWORDS + SCAN (FIX: Exclude Keywords biar tidak tumpang tindih)
 -- ═══════════════════════════════════════════════════════════
 local ITEM_KEYWORDS = {
     "trickortreatitem","trickortreat","trick_or_treat","trick","treat",
@@ -419,13 +408,17 @@ local function extractPart(obj)
     return nil
 end
 
-local function scanByKeyword(keywords, blacklist)
+-- FIX: Tambah excludeKeywords untuk hindari cross-detection
+local function scanByKeyword(keywords, blacklist, excludeKeywords)
     local found, seen = {}, {}
     pcall(function()
         for _, obj in ipairs(workspace:GetDescendants()) do
             if not obj.Parent then continue end
             if seen[obj] then continue end
             if checkName(obj.Name, keywords, blacklist) then
+                if excludeKeywords and checkName(obj.Name, excludeKeywords, {}) then
+                    continue
+                end
                 local part = extractPart(obj)
                 if part and part.Parent then
                     local root = part:FindFirstAncestorOfClass("Model") or obj
@@ -440,8 +433,14 @@ local function scanByKeyword(keywords, blacklist)
     return found
 end
 
-local function scanItems() return scanByKeyword(ITEM_KEYWORDS, ITEM_BLACKLIST) end
-local function scanPumpkins() return scanByKeyword(PUMPKIN_KEYWORDS, PUMPKIN_BLACKLIST) end
+-- FIX: Candy exclude pumpkin keywords, Pumpkin exclude candy keywords
+local function scanItems()
+    return scanByKeyword(ITEM_KEYWORDS, ITEM_BLACKLIST, PUMPKIN_KEYWORDS)
+end
+
+local function scanPumpkins()
+    return scanByKeyword(PUMPKIN_KEYWORDS, PUMPKIN_BLACKLIST, ITEM_KEYWORDS)
+end
 
 local function scanReapers()
     local found = {}
@@ -493,39 +492,44 @@ local function scanGhosts()
     return found
 end
 
--- ═══════════════════════════════════════════════════════════
--- WALK NATURAL: Smooth Vertical (naik/turun ke target)
--- ═══════════════════════════════════════════════════════════
-local lastVertStep = 0
+-- SCAN CACHE
+local scanCache = { items = {}, pumpkins = {}, lastUpdate = 0 }
+local SCAN_CACHE_DURATION = 0.8
+local function refreshCache()
+    if tick() - scanCache.lastUpdate > SCAN_CACHE_DURATION then
+        scanCache.items = scanItems()
+        scanCache.pumpkins = scanPumpkins()
+        scanCache.lastUpdate = tick()
+    end
+end
+local function getCachedItems()
+    refreshCache()
+    return scanCache.items
+end
+local function getCachedPumpkins()
+    refreshCache()
+    return scanCache.pumpkins
+end
+
+-- WALK NATURAL
+local lastVertAction = 0
+local activeTween = nil
 task.spawn(function()
     while true do
-        RunService.Heartbeat:Wait()
+        task.wait(0.1)
         if not State.WalkNaturalEnabled or not hasCharacter() then continue end
-        local hum = getHum()
-        local hrp = getHRP()
+        local hum, hrp = getHum(), getHRP()
         if not hum or not hrp then continue end
-
-        -- Noclip
         for _, p in ipairs(LP.Character:GetChildren()) do
-            if p:IsA("BasePart") and p.CanCollide then
-                p.CanCollide = false
-            end
+            if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
         end
-
-        local now = tick()
-        if now - lastVertStep < State.WalkVerticalSmoothness then continue end
-        lastVertStep = now
-
-        -- Kumpulkan target
         local checkList = {}
-        if State.CollectV1Enabled or State.CollectV2Enabled then
-            for _, d in ipairs(scanItems()) do table.insert(checkList, d) end
+        if State.AutoCollectCandy then
+            for _, d in ipairs(getCachedItems()) do table.insert(checkList, d) end
         end
-        if State.PumpkinEnabled then
-            for _, d in ipairs(scanPumpkins()) do table.insert(checkList, d) end
+        if State.AutoCollectPumpkin then
+            for _, d in ipairs(getCachedPumpkins()) do table.insert(checkList, d) end
         end
-
-        -- Target terdekat
         local nearest, nearestDist = nil, math.huge
         for _, d in ipairs(checkList) do
             if d.part and d.part.Parent then
@@ -536,41 +540,59 @@ task.spawn(function()
                 end
             end
         end
-        if not nearest then continue end
-
-        local targetPos = nearest.part.Position
-        local myPos = hrp.Position
+        if not nearest then
+            if activeTween then pcall(function() activeTween:Cancel() end) activeTween = nil end
+            continue
+        end
+        local targetPos, myPos = nearest.part.Position, hrp.Position
         local relY = targetPos.Y - myPos.Y
         local dx = targetPos.X - myPos.X
         local dz = targetPos.Z - myPos.Z
         local distXZ = math.sqrt(dx*dx + dz*dz)
-
-        -- Kalau target dalam jangkauan horizontal dan beda Y signifikan
         if distXZ < State.WalkHorizontalRange and math.abs(relY) > 1 then
-            local step = State.WalkVerticalSpeed * State.WalkVerticalSmoothness
-            if step > math.abs(relY) then step = math.abs(relY) end
-            local dir = relY > 0 and 1 or -1
-            pcall(function()
-                hrp.CFrame = hrp.CFrame + Vector3.new(0, step * dir, 0)
-            end)
-            StatsData.VerticalSteps += 1
+            local now = tick()
+            if State.WalkVertMode == "tween" then
+                if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then continue end
+                if now - lastVertAction < State.WalkTweenDelay then continue end
+                lastVertAction = now
+                local targetCF = CFrame.new(myPos.X, targetPos.Y, myPos.Z)
+                activeTween = TS:Create(hrp, TweenInfo.new(State.WalkTweenDuration, Enum.EasingStyle.Linear), {CFrame = targetCF})
+                activeTween:Play()
+                StatsData.VerticalSteps += 1
+            else
+                if now - lastVertAction < State.WalkVerticalSmoothness then continue end
+                lastVertAction = now
+                local step = State.WalkVerticalSpeed * State.WalkVerticalSmoothness
+                if step > math.abs(relY) then step = math.abs(relY) end
+                local dir = relY > 0 and 1 or -1
+                pcall(function() hrp.CFrame = hrp.CFrame + Vector3.new(0, step * dir, 0) end)
+                StatsData.VerticalSteps += 1
+            end
+        else
+            if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+                pcall(function() activeTween:Cancel() end)
+                activeTween = nil
+            end
         end
     end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- WALK TO TARGET (pathfinding + vertical smooth kalau perlu)
--- ═══════════════════════════════════════════════════════════
-local function walkToTarget(targetPart, timeout)
+-- WALK TO TARGET
+local function walkToTarget(targetPart, timeout, speed)
     timeout = timeout or 120
+    speed = speed or 32
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
     local hrp, hum = getHRP(), getHum()
     if not hrp or not hum then return false end
     local oldSpeed = hum.WalkSpeed
-    hum.WalkSpeed = State.WalkSpeed
+    hum.WalkSpeed = speed
     local success = false
     local startTime = tick()
-
+    local directDist = (hrp.Position - targetPart.Position).Magnitude
+    if directDist < 5 then
+        hum.WalkSpeed = oldSpeed
+        return true
+    end
     local path = PathfindingService:CreatePath({
         AgentRadius = 2, AgentHeight = 5,
         AgentCanJump = true, AgentCanClimb = true,
@@ -579,7 +601,6 @@ local function walkToTarget(targetPart, timeout)
     local ok = pcall(function()
         path:ComputeAsync(hrp.Position, targetPart.Position)
     end)
-
     if ok and path.Status == Enum.PathStatus.Success then
         local waypoints = path:GetWaypoints()
         for _, wp in ipairs(waypoints) do
@@ -604,10 +625,9 @@ local function walkToTarget(targetPart, timeout)
             task.wait(0.03)
         end
         if hasCharacter() and targetPart.Parent then
-            success = (getHRP().Position - targetPart.Position).Magnitude < 12
+            success = (getHRP().Position - targetPart.Position).Magnitude < 10
         end
     end
-
     if not success then
         local fbStart = tick()
         local lastProgressTime = tick()
@@ -620,7 +640,6 @@ local function walkToTarget(targetPart, timeout)
             local dir = targetPart.Position - h.Position
             local dist = dir.Magnitude
             if dist < 5 then success = true; break end
-
             local now = tick()
             if math.abs(lastDist - dist) < 0.8 then
                 if now - lastProgressTime > 2.5 then
@@ -645,160 +664,9 @@ local function walkToTarget(targetPart, timeout)
             task.wait(0.1)
         end
     end
-
     if hasCharacter() then pcall(function() hum:MoveTo(getHRP().Position) end) end
     hum.WalkSpeed = oldSpeed
     return success
-end
-
--- ═══════════════════════════════════════════════════════════
--- V2 METHODS
--- ═══════════════════════════════════════════════════════════
-local function moveModeTarget(targetPart, timeout)
-    timeout = timeout or State.CollectV2Timeout
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp, hum = getHRP(), getHum()
-    if not hrp or not hum then return false end
-    local oldSpeed = hum.WalkSpeed
-    hum.WalkSpeed = State.CollectV2WalkSpeed
-    local startTime = tick()
-    local lastProgressTime = tick()
-    local lastDist = (hrp.Position - targetPart.Position).Magnitude
-    local success = false
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        local diff = targetPart.Position - h.Position
-        local dist = diff.Magnitude
-        if dist < 5 then success = true; break end
-        local dir = Vector3.new(diff.X, 0, diff.Z)
-        if dir.Magnitude > 0 then
-            pcall(function() hum:Move(dir.Unit) end)
-        end
-        local now = tick()
-        if math.abs(lastDist - dist) < 0.8 then
-            if now - lastProgressTime > 2.5 then
-                pcall(function() hum.Jump = true end)
-                lastProgressTime = now
-            end
-        else
-            lastProgressTime = now
-            lastDist = dist
-        end
-        task.wait(0.05)
-    end
-    pcall(function() hum:Move(Vector3.zero) end)
-    hum.WalkSpeed = oldSpeed
-    return success
-end
-
-local function alignModeTarget(targetPart, timeout)
-    timeout = timeout or State.CollectV2Timeout
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp = getHRP()
-    if not hrp then return false end
-    local att = Instance.new("Attachment")
-    att.Parent = hrp
-    local align = Instance.new("AlignPosition")
-    align.Attachment0 = att
-    align.Mode = Enum.PositionAlignmentMode.OneAttachment
-    align.Position = targetPart.Position
-    align.MaxForce = 5e5
-    align.Responsiveness = 20
-    align.Parent = hrp
-    local vel = Instance.new("LinearVelocity")
-    vel.Attachment0 = att
-    vel.MaxForce = 5e5
-    vel.VectorVelocity = Vector3.zero
-    vel.RelativeTo = Enum.ActuatorRelativeTo.World
-    vel.Parent = hrp
-    local success = false
-    local startTime = tick()
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        local diff = targetPart.Position - h.Position
-        if diff.Magnitude < 4 then success = true; break end
-        align.Position = targetPart.Position
-        if diff.Magnitude > 0 then
-            vel.VectorVelocity = diff.Unit * State.CollectV2WalkSpeed
-        end
-        task.wait(0.05)
-    end
-    pcall(function() align:Destroy() end)
-    pcall(function() vel:Destroy() end)
-    pcall(function() att:Destroy() end)
-    return success
-end
-
-local function walkPointModeTarget(targetPart, timeout)
-    timeout = timeout or State.CollectV2Timeout
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp, hum = getHRP(), getHum()
-    if not hrp or not hum then return false end
-    local oldSpeed = hum.WalkSpeed
-    hum.WalkSpeed = State.CollectV2WalkSpeed
-    local startTime = tick()
-    local success = false
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        if (targetPart.Position - h.Position).Magnitude < 4 then success = true; break end
-        pcall(function() hum.WalkToPoint = targetPart.Position end)
-        task.wait(0.08)
-    end
-    hum.WalkSpeed = oldSpeed
-    return success
-end
-
-local function walkPartModeTarget(targetPart, timeout)
-    timeout = timeout or State.CollectV2Timeout
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp, hum = getHRP(), getHum()
-    if not hrp or not hum then return false end
-    local oldSpeed = hum.WalkSpeed
-    hum.WalkSpeed = State.CollectV2WalkSpeed
-    local startTime = tick()
-    local success = false
-    pcall(function() hum.WalkToPart = targetPart end)
-    while tick() - startTime < timeout do
-        if not hasCharacter() or not targetPart.Parent then break end
-        local h = getHRP()
-        if not h then break end
-        if (targetPart.Position - h.Position).Magnitude < 4 then success = true; break end
-        task.wait(0.1)
-    end
-    pcall(function() hum.WalkToPart = nil end)
-    hum.WalkSpeed = oldSpeed
-    return success
-end
-
-local function pathModeTarget(targetPart, timeout)
-    return walkToTarget(targetPart, timeout or State.CollectV2Timeout)
-end
-
--- MODE DISPATCHER
-local function moveV1(part, dist)
-    if State.WalkNaturalEnabled then
-        return walkToTarget(part, 120)
-    end
-    if dist <= 5 then return true end
-    return walkToTarget(part, 120)
-end
-
-local function moveV2(part)
-    if State.WalkNaturalEnabled then
-        return walkToTarget(part, 120)
-    end
-    local mode = State.CollectV2Mode
-    if mode == "move" then return moveModeTarget(part, State.CollectV2Timeout) end
-    if mode == "align" then return alignModeTarget(part, State.CollectV2Timeout) end
-    if mode == "walkpoint" then return walkPointModeTarget(part, State.CollectV2Timeout) end
-    if mode == "walkpart" then return walkPartModeTarget(part, State.CollectV2Timeout) end
-    return pathModeTarget(part, State.CollectV2Timeout)
 end
 
 -- GOD MODE
@@ -867,37 +735,78 @@ workspace.DescendantAdded:Connect(function(obj)
     end
 end)
 
+-- COLLECT ITEM (Reliable)
 local function collectItem(data)
     if not data or not data.part or not data.part.Parent then return false end
     local part, model = data.part, data.model
-    local success = false
-    local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if not prompt then prompt = part:FindFirstChildWhichIsA("ProximityPrompt") end
-    if prompt then
+    local hrp = getHRP()
+    if not hrp then return false end
+    local dist = (part.Position - hrp.Position).Magnitude
+    if dist > 15 then return false end
+
+    local claimed = false
+    local prompts = {}
+    local pModel = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if pModel then table.insert(prompts, pModel) end
+    local pPart = part:FindFirstChildWhichIsA("ProximityPrompt")
+    if pPart and pPart ~= pModel then table.insert(prompts, pPart) end
+
+    for _, prompt in ipairs(prompts) do
         pcall(function()
             prompt.MaxActivationDistance = 9e9
+            prompt.HoldDuration = 0
             prompt.Enabled = true
-            if State.NoDelay then prompt.HoldDuration = 0 end
         end)
-        if State.FirePrompt and fireproximityprompt then
-            pcall(function() fireproximityprompt(prompt, 0) success = true end)
+        if fireproximityprompt then
+            for i = 1, 3 do
+                pcall(function() fireproximityprompt(prompt, 0) end)
+                task.wait(0.08)
+                if not part.Parent or not model.Parent then
+                    claimed = true
+                    break
+                end
+            end
+        end
+        if claimed then break end
+    end
+
+    if not claimed then
+        local cds = {}
+        local cModel = model:FindFirstChildWhichIsA("ClickDetector", true)
+        if cModel then table.insert(cds, cModel) end
+        local cPart = part:FindFirstChildWhichIsA("ClickDetector")
+        if cPart and cPart ~= cModel then table.insert(cds, cPart) end
+        for _, cd in ipairs(cds) do
+            if fireclickdetector then
+                for i = 1, 2 do
+                    pcall(function() fireclickdetector(cd) end)
+                    task.wait(0.08)
+                    if not part.Parent or not model.Parent then
+                        claimed = true
+                        break
+                    end
+                end
+            end
+            if claimed then break end
         end
     end
-    local cd = model:FindFirstChildWhichIsA("ClickDetector", true)
-    if not cd and part then cd = part:FindFirstChildWhichIsA("ClickDetector") end
-    if cd and fireclickdetector then
-        pcall(function() fireclickdetector(cd) success = true end)
+
+    if not claimed and firetouchinterest then
+        for i = 1, 3 do
+            pcall(function()
+                firetouchinterest(hrp, part, 0)
+                task.wait(0.03)
+                firetouchinterest(hrp, part, 1)
+            end)
+            task.wait(0.08)
+            if not part.Parent or not model.Parent then
+                claimed = true
+                break
+            end
+        end
     end
-    local hrp = getHRP()
-    if hrp and firetouchinterest then
-        pcall(function()
-            firetouchinterest(hrp, part, 0)
-            task.wait(0.02)
-            firetouchinterest(hrp, part, 1)
-            success = true
-        end)
-    end
-    return success
+
+    return claimed
 end
 
 -- ESP
@@ -964,13 +873,13 @@ local function removeESP(model)
     end
 end
 
--- AUTO COLLECT V1
+-- AUTO COLLECT CANDY (FIX: Statistik)
 task.spawn(function()
     while true do
-        task.wait(State.CollectInterval)
-        if State.CollectV1Enabled and hasCharacter() then
+        task.wait(State.CandyInterval)
+        if State.AutoCollectCandy and hasCharacter() then
             AntiDetect.Running = true
-            local items = scanItems()
+            local items = getCachedItems()
             if #items > 0 then
                 local hrp = getHRP()
                 for _, d in ipairs(items) do
@@ -981,12 +890,31 @@ task.spawn(function()
                 for _, d in ipairs(items) do
                     if not hasCharacter() then break end
                     if collected >= 10 then break end
-                    moveV1(d.part, d.dist)
-                    if collectItem(d) then
+                    if State.CandyMethod == "path" then
+                        walkToTarget(d.part, State.CandyTimeout, State.CandyWalkSpeed)
+                    else
+                        if d.dist > 5 then
+                            walkToTarget(d.part, State.CandyTimeout, State.CandyWalkSpeed)
+                        end
+                    end
+                    task.wait(0.15)
+
+                    -- Catat attempt
+                    StatsData.ItemsAttempted += 1
+
+                    -- Coba claim 2x
+                    local claimed = collectItem(d)
+                    if not claimed then
+                        task.wait(0.2)
+                        claimed = collectItem(d)
+                    end
+
+                    -- FIX: Cek benar-benar candy hilang dari map
+                    if claimed and (not d.model.Parent) then
                         if not countedItems[d.model] then
                             countedItems[d.model] = true
                             StatsData.ItemsCollected += 1
-                            NotifyUser("V1", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
+                            NotifyUser("Candy", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
                         end
                         collected += 1
                         task.wait(0.2)
@@ -998,47 +926,13 @@ task.spawn(function()
     end
 end)
 
--- AUTO COLLECT V2
-task.spawn(function()
-    while true do
-        task.wait(State.CollectV2Interval)
-        if State.CollectV2Enabled and hasCharacter() then
-            AntiDetect.Running = true
-            local items = scanItems()
-            if #items > 0 then
-                local hrp = getHRP()
-                for _, d in ipairs(items) do
-                    d.dist = (d.part.Position - hrp.Position).Magnitude
-                end
-                table.sort(items, function(a, b) return a.dist < b.dist end)
-                local collected = 0
-                for _, d in ipairs(items) do
-                    if not hasCharacter() then break end
-                    if collected >= 10 then break end
-                    moveV2(d.part)
-                    if collectItem(d) then
-                        if not countedItems[d.model] then
-                            countedItems[d.model] = true
-                            StatsData.ItemsCollected += 1
-                            NotifyUser("V2", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
-                        end
-                        collected += 1
-                        task.wait(0.2)
-                    end
-                end
-            end
-            AntiDetect.Running = false
-        end
-    end
-end)
-
--- PUMPKIN
+-- AUTO COLLECT PUMPKIN (FIX: Statistik terpisah)
 task.spawn(function()
     while true do
         task.wait(State.PumpkinInterval)
-        if State.PumpkinEnabled and hasCharacter() then
+        if State.AutoCollectPumpkin and hasCharacter() then
             AntiDetect.Running = true
-            local pumpkins = scanPumpkins()
+            local pumpkins = getCachedPumpkins()
             if #pumpkins > 0 then
                 local hrp = getHRP()
                 for _, d in ipairs(pumpkins) do
@@ -1049,12 +943,26 @@ task.spawn(function()
                 for _, d in ipairs(pumpkins) do
                     if not hasCharacter() then break end
                     if collected >= 10 then break end
-                    if State.WalkNaturalEnabled or State.CollectV2Enabled then
-                        moveV2(d.part)
+                    if State.PumpkinMethod == "path" then
+                        walkToTarget(d.part, State.CandyTimeout, State.CandyWalkSpeed)
                     else
-                        moveV1(d.part, d.dist)
+                        if d.dist > 5 then
+                            walkToTarget(d.part, State.CandyTimeout, State.CandyWalkSpeed)
+                        end
                     end
-                    if collectItem(d) then
+                    task.wait(0.15)
+
+                    -- FIX: Pumpkin attempt terpisah
+                    StatsData.PumpkinsAttempted += 1
+
+                    local claimed = collectItem(d)
+                    if not claimed then
+                        task.wait(0.2)
+                        claimed = collectItem(d)
+                    end
+
+                    -- FIX: Cek benar-benar pumpkin hilang dari map
+                    if claimed and (not d.model.Parent) then
                         if not countedPumpkins[d.model] then
                             countedPumpkins[d.model] = true
                             StatsData.PumpkinsCollected += 1
@@ -1070,38 +978,16 @@ task.spawn(function()
     end
 end)
 
--- SPAWN COUNTER
+-- FOUND COUNTER (tanpa spawn yang membingungkan)
 task.spawn(function()
     while true do
         task.wait(3)
-        local items = scanItems()
+        local items = getCachedItems()
         StatsData.ItemsFound = #items
-        for _, d in ipairs(items) do
-            if not lastSeenItems[d.model] then
-                lastSeenItems[d.model] = true
-                StatsData.ItemsSpawned += 1
-            end
-        end
-        local curI = {}
-        for _, d in ipairs(items) do curI[d.model] = true end
-        for m in pairs(lastSeenItems) do
-            if not curI[m] then lastSeenItems[m] = nil end
-        end
+        local pk = getCachedPumpkins()
+        StatsData.PumpkinsFound = #pk
         for m in pairs(countedItems) do
             if not m.Parent then countedItems[m] = nil end
-        end
-        local pk = scanPumpkins()
-        StatsData.PumpkinsFound = #pk
-        for _, d in ipairs(pk) do
-            if not lastSeenPumpkins[d.model] then
-                lastSeenPumpkins[d.model] = true
-                StatsData.PumpkinsSpawned += 1
-            end
-        end
-        local curP = {}
-        for _, d in ipairs(pk) do curP[d.model] = true end
-        for m in pairs(lastSeenPumpkins) do
-            if not curP[m] then lastSeenPumpkins[m] = nil end
         end
         for m in pairs(countedPumpkins) do
             if not m.Parent then countedPumpkins[m] = nil end
@@ -1112,9 +998,9 @@ end)
 -- ESP LOOP
 task.spawn(function()
     while true do
-        task.wait(1.5)
+        task.wait(2)
         if State.ItemESP then
-            local items = scanItems()
+            local items = getCachedItems()
             local cur = {}
             for _, d in ipairs(items) do cur[d.model] = d end
             for m in pairs(itemCache) do
@@ -1132,7 +1018,7 @@ task.spawn(function()
             itemCache = {}
         end
         if State.PumpkinESP then
-            local pk = scanPumpkins()
+            local pk = getCachedPumpkins()
             local cur = {}
             for _, d in ipairs(pk) do cur[d.model] = d end
             for m in pairs(pumpkinCache) do
@@ -1192,7 +1078,7 @@ end)
 
 task.spawn(function()
     while true do
-        task.wait(0.7)
+        task.wait(1)
         if State.ShowDistance and hasCharacter() then
             local hrp = getHRP()
             local function update(cache, tagName, baseColor)
@@ -1323,8 +1209,8 @@ end
 
 Log = function(txt, tp) print("[Oc1DvHUB]["..(tp or "info"):upper().."] "..txt) end
 
-local TW, TH = 480, 360
-local TW_NORMAL, TH_NORMAL = 560, 440
+local TW, TH = 620, 440
+local TW_NORMAL, TH_NORMAL = 700, 520
 
 local Main = Instance.new("Frame")
 Main.Size = UDim2.new(0,TW,0,TH)
@@ -1335,7 +1221,7 @@ Main.BorderSizePixel = 0
 Main.ClipsDescendants = true
 Main.Active = true
 Main.Parent = SG
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0,16)
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0,18)
 
 local bgI = Instance.new("ImageLabel", Main)
 bgI.Size = UDim2.new(1,0,1,0)
@@ -1344,7 +1230,7 @@ bgI.Image = BG_LIST[S.curBG].id
 bgI.ImageTransparency = 0.15
 bgI.ScaleType = Enum.ScaleType.Crop
 bgI.ZIndex = 0
-Instance.new("UICorner", bgI).CornerRadius = UDim.new(0,16)
+Instance.new("UICorner", bgI).CornerRadius = UDim.new(0,18)
 
 local ovl = Instance.new("Frame", Main)
 ovl.Size = UDim2.new(1,0,1,0)
@@ -1352,13 +1238,95 @@ ovl.BackgroundColor3 = C.Bg
 ovl.BackgroundTransparency = S.BGBrightness
 ovl.BorderSizePixel = 0
 ovl.ZIndex = 1
-Instance.new("UICorner", ovl).CornerRadius = UDim.new(0,16)
+Instance.new("UICorner", ovl).CornerRadius = UDim.new(0,18)
+
+local effectsLayer = Instance.new("Frame", Main)
+effectsLayer.Size = UDim2.new(1,0,1,0)
+effectsLayer.BackgroundTransparency = 1
+effectsLayer.ClipsDescendants = true
+effectsLayer.ZIndex = 2
+Instance.new("UICorner", effectsLayer).CornerRadius = UDim.new(0,18)
+
+local gradLayer = Instance.new("Frame", effectsLayer)
+gradLayer.Size = UDim2.new(1,0,1,0)
+gradLayer.BackgroundColor3 = Color3.fromRGB(255,255,255)
+gradLayer.BackgroundTransparency = 0.85
+gradLayer.BorderSizePixel = 0
+gradLayer.ZIndex = 3
+Instance.new("UICorner", gradLayer).CornerRadius = UDim.new(0,18)
+local gradBg = Instance.new("UIGradient", gradLayer)
+gradBg.Rotation = 45
+gradBg.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0.0, Color3.fromRGB(255, 140, 70)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 120)),
+    ColorSequenceKeypoint.new(1.0, Color3.fromRGB(255, 100, 50)),
+})
+gradBg.Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 0.85),
+    NumberSequenceKeypoint.new(0.5, 0.5),
+    NumberSequenceKeypoint.new(1, 0.85),
+})
+task.spawn(function()
+    while gradLayer.Parent do
+        for i = 0, 1, 0.02 do
+            if not gradLayer.Parent then break end
+            gradBg.Rotation = 45 + i * 360
+            task.wait(0.04)
+        end
+    end
+end)
+
+local bgOrbs = {}
+for i = 1, 5 do
+    local orb = Instance.new("ImageLabel", effectsLayer)
+    local sz = math.random(80, 160)
+    orb.Size = UDim2.new(0, sz, 0, sz)
+    orb.Position = UDim2.new(math.random(), 0, math.random(), 0)
+    orb.BackgroundTransparency = 1
+    orb.Image = "rbxassetid://5028857084"
+    orb.ImageColor3 = Color3.fromRGB(255, 130, 60)
+    orb.ImageTransparency = math.random(75, 90) / 100
+    orb.ZIndex = 4
+    table.insert(bgOrbs, {obj = orb, phase = math.random() * math.pi * 2})
+end
+
+task.spawn(function()
+    while effectsLayer.Parent do
+        local t = os.clock()
+        for _, o in ipairs(bgOrbs) do
+            if o.obj and o.obj.Parent then
+                local x = 0.5 + math.sin(t * 0.3 + o.phase) * 0.4
+                local y = 0.5 + math.cos(t * 0.25 + o.phase) * 0.4
+                o.obj.Position = UDim2.new(x, 0, y, 0)
+                o.obj.ImageTransparency = 0.78 + math.sin(t + o.phase) * 0.12
+            end
+        end
+        task.wait(0.04)
+    end
+end)
 
 local mst = Instance.new("UIStroke", Main)
-mst.Thickness = 1.5; mst.Color = C.Pri; mst.Transparency = 0.35; mst.Parent = Main
+mst.Thickness = 1.8; mst.Color = C.Pri; mst.Transparency = 0.35; mst.Parent = Main
 track(mst, "Color")
 
-local TH_H = 40
+local pulseStroke = Instance.new("UIStroke", Main)
+pulseStroke.Color = C.Pri
+pulseStroke.Thickness = 1.5
+pulseStroke.Transparency = 0.6
+pulseStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+pulseStroke.Parent = Main
+track(pulseStroke, "Color")
+
+task.spawn(function()
+    while Main.Parent do
+        local t = os.clock()
+        pulseStroke.Transparency = 0.6 + math.sin(t * 2) * 0.2
+        pulseStroke.Thickness = 1.5 + math.sin(t * 2) * 0.5
+        task.wait(0.06)
+    end
+end)
+
+local TH_H = 42
 local Title = Instance.new("Frame", Main)
 Title.Size = UDim2.new(1,0,0,TH_H)
 Title.BackgroundColor3 = C.PriDark
@@ -1366,41 +1334,64 @@ Title.BackgroundTransparency = 0.8
 Title.BorderSizePixel = 0
 Title.ZIndex = 20
 Title.Active = true
-Instance.new("UICorner", Title).CornerRadius = UDim.new(0,16)
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0,18)
 track(Title, "BackgroundColor3")
 
+local hGradNew = Instance.new("UIGradient", Title)
+hGradNew.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 20, 90)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(120, 40, 80)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 90, 30)),
+})
+hGradNew.Rotation = 30
+
+local logoTiny = Instance.new("ImageLabel", Title)
+logoTiny.Size = UDim2.new(0, 26, 0, 26)
+logoTiny.Position = UDim2.new(0, 10, 0.5, -13)
+logoTiny.BackgroundTransparency = 1
+logoTiny.Image = CONFIG.LOGO
+logoTiny.ZIndex = 22
+
 local Ttl = Instance.new("TextLabel", Title)
-Ttl.Size = UDim2.new(1,-140,1,0)
-Ttl.Position = UDim2.new(0,118,0,0)
+Ttl.Size = UDim2.new(0, 250, 1, 0)
+Ttl.Position = UDim2.new(0, 42, 0, 0)
 Ttl.BackgroundTransparency = 1
 Ttl.RichText = true
 Ttl.Text = '<font color="rgb(255,255,255)">Oc1Dv</font><font color="rgb(255,145,80)">HUB</font>'
-Ttl.TextSize = 14
+Ttl.TextSize = 15
 Ttl.Font = Enum.Font.GothamBold
 Ttl.TextXAlignment = Enum.TextXAlignment.Left
 Ttl.ZIndex = 21
 
-local DOT_SIZE = 12
-local GrnB = Instance.new("TextButton", Title)
-GrnB.Size = UDim2.new(0,DOT_SIZE,0,DOT_SIZE)
-GrnB.Position = UDim2.new(1,-72,0.5,-DOT_SIZE/2)
-GrnB.BackgroundColor3 = Color3.fromRGB(80, 220, 120)
-GrnB.BorderSizePixel = 0; GrnB.Text = ""; GrnB.AutoButtonColor = false; GrnB.ZIndex = 22
-Instance.new("UICorner", GrnB).CornerRadius = UDim.new(1,0)
-
 local MinB = Instance.new("TextButton", Title)
-MinB.Size = UDim2.new(0,DOT_SIZE,0,DOT_SIZE)
-MinB.Position = UDim2.new(1,-52,0.5,-DOT_SIZE/2)
-MinB.BackgroundColor3 = Color3.fromRGB(255,200,70)
-MinB.BorderSizePixel = 0; MinB.Text = ""; MinB.AutoButtonColor = false; MinB.ZIndex = 22
-Instance.new("UICorner", MinB).CornerRadius = UDim.new(1,0)
+MinB.Size = UDim2.new(0, 30, 0, 24)
+MinB.Position = UDim2.new(1, -74, 0.5, -12)
+MinB.BackgroundColor3 = Color3.fromRGB(50, 50, 58)
+MinB.BorderSizePixel = 0
+MinB.Text = "−"
+MinB.TextColor3 = Color3.fromRGB(255, 220, 120)
+MinB.TextSize = 18
+MinB.Font = Enum.Font.GothamBold
+MinB.AutoButtonColor = false
+MinB.ZIndex = 22
+Instance.new("UICorner", MinB).CornerRadius = UDim.new(0, 6)
+MinB.MouseEnter:Connect(function() TS:Create(MinB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(70, 70, 78)}):Play() end)
+MinB.MouseLeave:Connect(function() TS:Create(MinB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 58)}):Play() end)
 
 local ClsB = Instance.new("TextButton", Title)
-ClsB.Size = UDim2.new(0,DOT_SIZE,0,DOT_SIZE)
-ClsB.Position = UDim2.new(1,-32,0.5,-DOT_SIZE/2)
-ClsB.BackgroundColor3 = Color3.fromRGB(255,95,90)
-ClsB.BorderSizePixel = 0; ClsB.Text = ""; ClsB.AutoButtonColor = false; ClsB.ZIndex = 22
-Instance.new("UICorner", ClsB).CornerRadius = UDim.new(1,0)
+ClsB.Size = UDim2.new(0, 30, 0, 24)
+ClsB.Position = UDim2.new(1, -40, 0.5, -12)
+ClsB.BackgroundColor3 = Color3.fromRGB(50, 50, 58)
+ClsB.BorderSizePixel = 0
+ClsB.Text = "×"
+ClsB.TextColor3 = Color3.fromRGB(255, 120, 120)
+ClsB.TextSize = 20
+ClsB.Font = Enum.Font.GothamBold
+ClsB.AutoButtonColor = false
+ClsB.ZIndex = 22
+Instance.new("UICorner", ClsB).CornerRadius = UDim.new(0, 6)
+ClsB.MouseEnter:Connect(function() TS:Create(ClsB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(200, 60, 60)}):Play() end)
+ClsB.MouseLeave:Connect(function() TS:Create(ClsB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 58)}):Play() end)
 
 local FB = Instance.new("TextButton")
 FB.Size = UDim2.new(0,52,0,52)
@@ -1467,22 +1458,15 @@ MinB.MouseButton1Click:Connect(function()
         Size = isMin and UDim2.new(0,TW,0,TH) or UDim2.new(0,TW,0,TH_H)
     }):Play()
 end)
-GrnB.MouseButton1Click:Connect(function()
-    sfx()
-    S.MiniMode = not S.MiniMode
-    local tW, tH = (S.MiniMode and TW or TW_NORMAL), (S.MiniMode and TH or TH_NORMAL)
-    TS:Create(Main, TweenInfo.new(0.3, Enum.EasingStyle.Quint), { Size = UDim2.new(0, tW, 0, tH) }):Play()
-    NotifyUser("Size", S.MiniMode and "Mini" or "Normal", "info")
-end)
 FB.MouseButton1Click:Connect(doShow)
 
-local SX, SY = 10, TH_H + 10
-local SW = 110
-local UH = 46
-local CX = SX + SW + 8
+local SX, SY = 12, TH_H + 12
+local SW = 130
+local UH = 52
+local CX = SX + SW + 10
 
 local SB = Instance.new("Frame", Main)
-SB.Size = UDim2.new(0,SW,1,-SY-UH-14)
+SB.Size = UDim2.new(0,SW,1,-SY-UH-16)
 SB.Position = UDim2.new(0,SX,0,SY)
 SB.BackgroundColor3 = C.Panel
 SB.BackgroundTransparency = 0.5
@@ -1496,7 +1480,7 @@ track(sbs, "Color")
 
 local UI_ = Instance.new("Frame", Main)
 UI_.Size = UDim2.new(0,SW,0,UH)
-UI_.Position = UDim2.new(0,SX,1,-(UH+10))
+UI_.Position = UDim2.new(0,SX,1,-(UH+12))
 UI_.BackgroundColor3 = C.Panel
 UI_.BackgroundTransparency = 0.5
 UI_.BorderSizePixel = 0
@@ -1507,8 +1491,8 @@ uis.Color = C.Pri; uis.Thickness = 1; uis.Transparency = 0.7; uis.Parent = UI_
 track(uis, "Color")
 
 local AV = Instance.new("Frame", UI_)
-AV.Size = UDim2.new(0,30,0,30)
-AV.Position = UDim2.new(0,8,0.5,-15)
+AV.Size = UDim2.new(0,34,0,34)
+AV.Position = UDim2.new(0,10,0.5,-17)
 AV.BackgroundColor3 = Color3.fromRGB(50,50,58)
 AV.BorderSizePixel = 0
 AV.ZIndex = 11
@@ -1530,19 +1514,19 @@ task.spawn(function()
 end)
 
 local DN = Instance.new("TextLabel", UI_)
-DN.Size = UDim2.new(1,-48,0,14); DN.Position = UDim2.new(0,44,0,8)
+DN.Size = UDim2.new(1,-58,0,15); DN.Position = UDim2.new(0,50,0,10)
 DN.BackgroundTransparency = 1; DN.Text = LP.DisplayName or LP.Name
 DN.TextColor3 = C.Txt; DN.TextSize = 11; DN.Font = Enum.Font.GothamMedium
 DN.TextXAlignment = Enum.TextXAlignment.Left; DN.TextTruncate = Enum.TextTruncate.AtEnd; DN.ZIndex = 11
 
 local UN = Instance.new("TextLabel", UI_)
-UN.Size = UDim2.new(1,-48,0,12); UN.Position = UDim2.new(0,44,0,24)
+UN.Size = UDim2.new(1,-58,0,13); UN.Position = UDim2.new(0,50,0,28)
 UN.BackgroundTransparency = 1; UN.Text = "@" .. LP.Name
 UN.TextColor3 = C.Dim; UN.TextSize = 9; UN.Font = Enum.Font.Gotham
 UN.TextXAlignment = Enum.TextXAlignment.Left; UN.TextTruncate = Enum.TextTruncate.AtEnd; UN.ZIndex = 11
 
 local Cont = Instance.new("Frame", Main)
-Cont.Size = UDim2.new(1,-(CX+10),1,-SY-10)
+Cont.Size = UDim2.new(1,-(CX+12),1,-SY-12)
 Cont.Position = UDim2.new(0,CX,0,SY)
 Cont.BackgroundColor3 = C.Panel
 Cont.BackgroundTransparency = 0.55
@@ -1554,7 +1538,7 @@ cts.Color = C.Pri; cts.Thickness = 1; cts.Transparency = 0.7; cts.Parent = Cont
 track(cts, "Color")
 
 local SearchBar = Instance.new("Frame", Cont)
-SearchBar.Size = UDim2.new(1,-16,0,26)
+SearchBar.Size = UDim2.new(1,-16,0,30)
 SearchBar.Position = UDim2.new(0,8,0,8)
 SearchBar.BackgroundColor3 = Color3.fromRGB(52,52,60)
 SearchBar.BackgroundTransparency = 0.25
@@ -1570,15 +1554,15 @@ SearchInput.Text = ""
 SearchInput.PlaceholderText = "Cari fitur..."
 SearchInput.PlaceholderColor3 = C.Dim
 SearchInput.TextColor3 = C.Txt
-SearchInput.TextSize = 11
+SearchInput.TextSize = 12
 SearchInput.Font = Enum.Font.Gotham
 SearchInput.TextXAlignment = Enum.TextXAlignment.Left
 SearchInput.ClearTextOnFocus = false
 SearchInput.ZIndex = 12
 
 local THF = Instance.new("Frame", Cont)
-THF.Size = UDim2.new(1,-16,0,22)
-THF.Position = UDim2.new(0,8,0,40)
+THF.Size = UDim2.new(1,-16,0,24)
+THF.Position = UDim2.new(0,8,0,46)
 THF.BackgroundTransparency = 1
 THF.ZIndex = 11
 
@@ -1588,7 +1572,7 @@ THt.Position = UDim2.new(0,4,0,0)
 THt.BackgroundTransparency = 1
 THt.Text = "RUMAH"
 THt.TextColor3 = C.Txt
-THt.TextSize = 13
+THt.TextSize = 14
 THt.Font = Enum.Font.GothamMedium
 THt.TextXAlignment = Enum.TextXAlignment.Left
 THt.ZIndex = 12
@@ -1599,14 +1583,14 @@ local tabData = {
 }
 
 local tabContent = {}
-local CONTENT_Y = 70
+local CONTENT_Y = 78
 for i, t in ipairs(tabData) do
     local sc = Instance.new("ScrollingFrame", Cont)
-    sc.Size = UDim2.new(1,-16,1,-CONTENT_Y-8)
+    sc.Size = UDim2.new(1,-16,1,-CONTENT_Y-10)
     sc.Position = UDim2.new(0,8,0,CONTENT_Y)
     sc.BackgroundTransparency = 1
     sc.BorderSizePixel = 0
-    sc.ScrollBarThickness = 3
+    sc.ScrollBarThickness = 4
     sc.ScrollBarImageColor3 = C.Pri
     sc.CanvasSize = UDim2.new(0,0,0,0)
     sc.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -1615,24 +1599,26 @@ for i, t in ipairs(tabData) do
     tabContent[t.name] = sc
     track(sc, "ScrollBarImageColor3")
     local lay = Instance.new("UIListLayout", sc)
-    lay.Padding = UDim.new(0,6)
+    lay.Padding = UDim.new(0, 10)
     lay.SortOrder = Enum.SortOrder.LayoutOrder
     local pad = Instance.new("UIPadding", sc)
-    pad.PaddingRight = UDim.new(0,4)
+    pad.PaddingRight = UDim.new(0, 6)
+    pad.PaddingTop = UDim.new(0, 4)
+    pad.PaddingBottom = UDim.new(0, 12)
 end
 
 local tabBtns = {}
 local curTab = "RUMAH"
 for i, t in ipairs(tabData) do
     local b = Instance.new("TextButton", SB)
-    b.Size = UDim2.new(1,-16,0,24)
-    b.Position = UDim2.new(0,8,0,4+(i-1)*26)
+    b.Size = UDim2.new(1,-18,0,28)
+    b.Position = UDim2.new(0,9,0,6+(i-1)*30)
     b.BackgroundColor3 = (i==1) and C.Pri or Color3.fromRGB(50,50,58)
     b.BackgroundTransparency = (i==1) and 0.05 or 0.35
     b.BorderSizePixel = 0
     b.Text = t.name
     b.TextColor3 = (i==1) and Color3.fromRGB(255,255,255) or C.Txt
-    b.TextSize = 9
+    b.TextSize = 10
     b.Font = Enum.Font.GothamMedium
     b.AutoButtonColor = false
     b.ZIndex = 100
@@ -1673,13 +1659,13 @@ end)
 
 local function Btn(parent, text, cb, col)
     local b = Instance.new("TextButton", parent)
-    b.Size = UDim2.new(1,-4,0,32)
+    b.Size = UDim2.new(1,-4,0,34)
     b.BackgroundColor3 = col or C.Card
     b.BackgroundTransparency = 0.2
     b.BorderSizePixel = 0
     b.Text = text
     b.TextColor3 = (col and Color3.fromRGB(255,255,255)) or C.Pri
-    b.TextSize = 11
+    b.TextSize = 12
     b.Font = Enum.Font.GothamMedium
     b.AutoButtonColor = false
     b.ZIndex = 11
@@ -1694,11 +1680,11 @@ end
 
 local function Sect(parent, text)
     local l = Instance.new("TextLabel", parent)
-    l.Size = UDim2.new(1,-4,0,16)
+    l.Size = UDim2.new(1,-4,0,18)
     l.BackgroundTransparency = 1
     l.Text = text
     l.TextColor3 = C.Pri
-    l.TextSize = 10
+    l.TextSize = 11
     l.Font = Enum.Font.GothamBold
     l.TextXAlignment = Enum.TextXAlignment.Left
     l.ZIndex = 10
@@ -1708,7 +1694,7 @@ end
 
 local function Toggle(parent, title, initial, cb)
     local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(1,-4,0,30)
+    f.Size = UDim2.new(1,-4,0,36)
     f.BackgroundColor3 = C.Card
     f.BackgroundTransparency = 0.2
     f.BorderSizePixel = 0
@@ -1716,21 +1702,21 @@ local function Toggle(parent, title, initial, cb)
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
     trackSearch(f, title)
     local lbl = Instance.new("TextLabel", f)
-    lbl.Size = UDim2.new(1,-60,1,0)
-    lbl.Position = UDim2.new(0,10,0,0)
+    lbl.Size = UDim2.new(1,-64,1,0)
+    lbl.Position = UDim2.new(0,12,0,0)
     lbl.BackgroundTransparency = 1
     lbl.Text = title; lbl.TextColor3 = C.Txt
-    lbl.TextSize = 11; lbl.Font = Enum.Font.GothamMedium
+    lbl.TextSize = 12; lbl.Font = Enum.Font.GothamMedium
     lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.ZIndex = 11
     local bg = Instance.new("Frame", f)
-    bg.Size = UDim2.new(0,40,0,22)
-    bg.Position = UDim2.new(1,-50,0.5,-11)
+    bg.Size = UDim2.new(0,44,0,24)
+    bg.Position = UDim2.new(1,-56,0.5,-12)
     bg.BackgroundColor3 = initial and C.Grn or Color3.fromRGB(60,60,68)
     bg.BorderSizePixel = 0; bg.ZIndex = 11
     Instance.new("UICorner", bg).CornerRadius = UDim.new(1,0)
     local knob = Instance.new("Frame", bg)
-    knob.Size = UDim2.new(0,18,0,18)
-    knob.Position = initial and UDim2.new(1,-20,0.5,-9) or UDim2.new(0,2,0.5,-9)
+    knob.Size = UDim2.new(0,20,0,20)
+    knob.Position = initial and UDim2.new(1,-22,0.5,-10) or UDim2.new(0,2,0.5,-10)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     knob.BorderSizePixel = 0; knob.ZIndex = 12
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
@@ -1741,7 +1727,7 @@ local function Toggle(parent, title, initial, cb)
     btn.MouseButton1Click:Connect(function()
         sfx()
         state = not state
-        knob.Position = state and UDim2.new(1,-20,0.5,-9) or UDim2.new(0,2,0.5,-9)
+        knob.Position = state and UDim2.new(1,-22,0.5,-10) or UDim2.new(0,2,0.5,-10)
         bg.BackgroundColor3 = state and C.Grn or Color3.fromRGB(60,60,68)
         if cb then pcall(cb, state) end
         if state then NotifyUser("Enabled", title, "success") end
@@ -1751,7 +1737,7 @@ end
 
 local function Slider(parent, title, mn, mx, df, cb)
     local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(1,-4,0,44)
+    f.Size = UDim2.new(1,-4,0,52)
     f.BackgroundColor3 = C.Card
     f.BackgroundTransparency = 0.25
     f.BorderSizePixel = 0
@@ -1759,15 +1745,15 @@ local function Slider(parent, title, mn, mx, df, cb)
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
     trackSearch(f, title)
     local l = Instance.new("TextLabel", f)
-    l.Size = UDim2.new(1,-14,0,14)
-    l.Position = UDim2.new(0,10,0,6)
+    l.Size = UDim2.new(1,-14,0,16)
+    l.Position = UDim2.new(0,12,0,8)
     l.BackgroundTransparency = 1
     l.Text = title .. ": " .. df
-    l.TextColor3 = C.Txt; l.TextSize = 11
+    l.TextColor3 = C.Txt; l.TextSize = 12
     l.Font = Enum.Font.GothamMedium; l.TextXAlignment = Enum.TextXAlignment.Left; l.ZIndex = 11
     local bar = Instance.new("Frame", f)
-    bar.Size = UDim2.new(1,-20,0,8)
-    bar.Position = UDim2.new(0,10,0,26)
+    bar.Size = UDim2.new(1,-24,0,10)
+    bar.Position = UDim2.new(0,12,0,32)
     bar.BackgroundColor3 = Color3.fromRGB(60,60,68)
     bar.BorderSizePixel = 0; bar.ZIndex = 11
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
@@ -1778,8 +1764,8 @@ local function Slider(parent, title, mn, mx, df, cb)
     Instance.new("UICorner", fl).CornerRadius = UDim.new(1,0)
     track(fl, "BackgroundColor3")
     local knob = Instance.new("Frame", fl)
-    knob.Size = UDim2.new(0,14,0,14)
-    knob.Position = UDim2.new(1,-7,0.5,-7)
+    knob.Size = UDim2.new(0,16,0,16)
+    knob.Position = UDim2.new(1,-8,0.5,-8)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     knob.BorderSizePixel = 0; knob.ZIndex = 13
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
@@ -1805,7 +1791,7 @@ end
 
 local function Dropdown(parent, title, options, default, cb)
     local f = Instance.new("Frame", parent)
-    f.Size = UDim2.new(1,-4,0,30)
+    f.Size = UDim2.new(1,-4,0,36)
     f.BackgroundColor3 = C.Card
     f.BackgroundTransparency = 0.2
     f.BorderSizePixel = 0
@@ -1814,22 +1800,22 @@ local function Dropdown(parent, title, options, default, cb)
     trackSearch(f, title)
     local lbl = Instance.new("TextLabel", f)
     lbl.Size = UDim2.new(0.5,0,1,0)
-    lbl.Position = UDim2.new(0,10,0,0)
+    lbl.Position = UDim2.new(0,12,0,0)
     lbl.BackgroundTransparency = 1
     lbl.Text = title
     lbl.TextColor3 = C.Txt
-    lbl.TextSize = 11
+    lbl.TextSize = 12
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 11
     local btn = Instance.new("TextButton", f)
-    btn.Size = UDim2.new(0.45,0,0,22)
-    btn.Position = UDim2.new(0.53,0,0.5,-11)
+    btn.Size = UDim2.new(0.45,0,0,24)
+    btn.Position = UDim2.new(0.53,0,0.5,-12)
     btn.BackgroundColor3 = Color3.fromRGB(60,60,68)
     btn.BorderSizePixel = 0
     btn.Text = tostring(default)
     btn.TextColor3 = C.Pri
-    btn.TextSize = 10
+    btn.TextSize = 11
     btn.Font = Enum.Font.GothamBold
     btn.AutoButtonColor = false
     btn.ZIndex = 11
@@ -1848,15 +1834,15 @@ end
 -- FILL RUMAH
 local tr = tabContent.RUMAH
 local welcomeCard = Instance.new("Frame", tr)
-welcomeCard.Size = UDim2.new(1,-4,0,70)
+welcomeCard.Size = UDim2.new(1,-4,0,78)
 welcomeCard.BackgroundColor3 = C.Card
 welcomeCard.BackgroundTransparency = 0.25
 welcomeCard.BorderSizePixel = 0
 welcomeCard.ZIndex = 10
 Instance.new("UICorner", welcomeCard).CornerRadius = UDim.new(0,12)
 local bigAv = Instance.new("Frame", welcomeCard)
-bigAv.Size = UDim2.new(0,52,0,52)
-bigAv.Position = UDim2.new(0,10,0.5,-26)
+bigAv.Size = UDim2.new(0,58,0,58)
+bigAv.Position = UDim2.new(0,12,0.5,-29)
 bigAv.BackgroundColor3 = Color3.fromRGB(55,55,63)
 bigAv.BorderSizePixel = 0; bigAv.ZIndex = 12
 Instance.new("UICorner", bigAv).CornerRadius = UDim.new(1,0)
@@ -1875,32 +1861,76 @@ task.spawn(function()
     if ok and t then bigAvI.Image = t end
 end)
 local greetLbl = Instance.new("TextLabel", welcomeCard)
-greetLbl.Size = UDim2.new(1,-74,0,18)
-greetLbl.Position = UDim2.new(0,72,0,12)
+greetLbl.Size = UDim2.new(1,-84,0,20)
+greetLbl.Position = UDim2.new(0,82,0,12)
 greetLbl.BackgroundTransparency = 1
 greetLbl.Text = "Halo, " .. (LP.DisplayName or LP.Name) .. "!"
-greetLbl.TextColor3 = C.Txt; greetLbl.TextSize = 13
-greetLbl.Font = Enum.Font.GothamMedium
+greetLbl.TextColor3 = C.Txt; greetLbl.TextSize = 14
+greetLbl.Font = Enum.Font.GothamBold
 greetLbl.TextXAlignment = Enum.TextXAlignment.Left; greetLbl.ZIndex = 12
 local clockLbl = Instance.new("TextLabel", welcomeCard)
-clockLbl.Size = UDim2.new(1,-74,0,14)
-clockLbl.Position = UDim2.new(0,72,0,32)
+clockLbl.Size = UDim2.new(1,-84,0,15)
+clockLbl.Position = UDim2.new(0,82,0,34)
 clockLbl.BackgroundTransparency = 1
 clockLbl.Text = "--"; clockLbl.TextColor3 = C.Dim
-clockLbl.TextSize = 10; clockLbl.Font = Enum.Font.Gotham
+clockLbl.TextSize = 11; clockLbl.Font = Enum.Font.Gotham
 clockLbl.TextXAlignment = Enum.TextXAlignment.Left; clockLbl.ZIndex = 12
 local uptimeLbl = Instance.new("TextLabel", welcomeCard)
-uptimeLbl.Size = UDim2.new(1,-74,0,14)
-uptimeLbl.Position = UDim2.new(0,72,0,48)
+uptimeLbl.Size = UDim2.new(1,-84,0,15)
+uptimeLbl.Position = UDim2.new(0,82,0,52)
 uptimeLbl.BackgroundTransparency = 1
 uptimeLbl.Text = "Playtime: 00:00:00"
-uptimeLbl.TextColor3 = C.Dim; uptimeLbl.TextSize = 10
+uptimeLbl.TextColor3 = C.Dim; uptimeLbl.TextSize = 11
 uptimeLbl.Font = Enum.Font.Gotham
 uptimeLbl.TextXAlignment = Enum.TextXAlignment.Left; uptimeLbl.ZIndex = 12
 
+Sect(tr, "SERVER INFO")
+
+local infoCard = Instance.new("Frame", tr)
+infoCard.Size = UDim2.new(1,-4,0,116)
+infoCard.BackgroundColor3 = C.Card
+infoCard.BackgroundTransparency = 0.25
+infoCard.BorderSizePixel = 0
+infoCard.ZIndex = 10
+Instance.new("UICorner", infoCard).CornerRadius = UDim.new(0,12)
+
+local function mkInfoRow(parent, y, label)
+    local rL = Instance.new("TextLabel", parent)
+    rL.Size = UDim2.new(0,110,0,20)
+    rL.Position = UDim2.new(0,14,0,y)
+    rL.BackgroundTransparency = 1
+    rL.Text = label
+    rL.TextColor3 = C.Dim
+    rL.TextSize = 11
+    rL.Font = Enum.Font.Gotham
+    rL.TextXAlignment = Enum.TextXAlignment.Left
+    rL.ZIndex = 12
+    local vL = Instance.new("TextLabel", parent)
+    vL.Size = UDim2.new(1,-130,0,20)
+    vL.Position = UDim2.new(0,124,0,y)
+    vL.BackgroundTransparency = 1
+    vL.Text = "--"
+    vL.TextColor3 = C.Txt
+    vL.TextSize = 11
+    vL.Font = Enum.Font.GothamMedium
+    vL.TextXAlignment = Enum.TextXAlignment.Left
+    vL.TextTruncate = Enum.TextTruncate.AtEnd
+    vL.ZIndex = 12
+    return vL
+end
+
+local jobVal = mkInfoRow(infoCard, 10, "Job ID")
+local placeVal = mkInfoRow(infoCard, 34, "Place ID")
+local gameVal = mkInfoRow(infoCard, 58, "Game")
+local regionVal = mkInfoRow(infoCard, 82, "Region")
+placeVal.Text = tostring(game.PlaceId)
+jobVal.Text = game.JobId ~= "" and game.JobId or "Studio/Private"
+gameVal.Text = S.GameName
+regionVal.Text = (game.JobId ~= "" and "Online") or "Studio"
+
 Sect(tr, "LIVE STATS")
 local statsCard = Instance.new("Frame", tr)
-statsCard.Size = UDim2.new(1,-4,0,58)
+statsCard.Size = UDim2.new(1,-4,0,64)
 statsCard.BackgroundColor3 = C.Card
 statsCard.BackgroundTransparency = 0.25
 statsCard.BorderSizePixel = 0
@@ -1908,31 +1938,31 @@ statsCard.ZIndex = 10
 Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0,12)
 local function mkStatBox(parent, x, title)
     local box = Instance.new("Frame", parent)
-    box.Size = UDim2.new(0,100,0,48)
-    box.Position = UDim2.new(0,x,0.5,-24)
+    box.Size = UDim2.new(0,130,0,52)
+    box.Position = UDim2.new(0,x,0.5,-26)
     box.BackgroundColor3 = Color3.fromRGB(52,52,60)
     box.BackgroundTransparency = 0.2
     box.BorderSizePixel = 0
     box.ZIndex = 11
     Instance.new("UICorner", box).CornerRadius = UDim.new(0,8)
     local tL = Instance.new("TextLabel", box)
-    tL.Size = UDim2.new(1,0,0,12)
-    tL.Position = UDim2.new(0,0,0,6)
+    tL.Size = UDim2.new(1,0,0,14)
+    tL.Position = UDim2.new(0,0,0,8)
     tL.BackgroundTransparency = 1
     tL.Text = title; tL.TextColor3 = C.Dim
-    tL.TextSize = 9; tL.Font = Enum.Font.GothamMedium; tL.ZIndex = 12
+    tL.TextSize = 10; tL.Font = Enum.Font.GothamMedium; tL.ZIndex = 12
     local vL = Instance.new("TextLabel", box)
-    vL.Size = UDim2.new(1,0,0,20)
-    vL.Position = UDim2.new(0,0,0,22)
+    vL.Size = UDim2.new(1,0,0,22)
+    vL.Position = UDim2.new(0,0,0,24)
     vL.BackgroundTransparency = 1
     vL.Text = "--"; vL.TextColor3 = C.Pri
-    vL.TextSize = 14; vL.Font = Enum.Font.GothamBold; vL.ZIndex = 12
+    vL.TextSize = 16; vL.Font = Enum.Font.GothamBold; vL.ZIndex = 12
     track(vL, "TextColor3")
     return vL
 end
 local fpsVal = mkStatBox(statsCard, 8, "FPS")
-local pingVal = mkStatBox(statsCard, 116, "PING")
-local playerVal = mkStatBox(statsCard, 224, "PLAYERS")
+local pingVal = mkStatBox(statsCard, 146, "PING")
+local playerVal = mkStatBox(statsCard, 284, "PLAYERS")
 
 local fpsCount, fpsTime, curFPS = 0, 0, 0
 RunService.RenderStepped:Connect(function(dt)
@@ -1965,36 +1995,37 @@ end)
 -- FILL COLLECT
 local tcol = tabContent.COLLECT
 
-Sect(tcol, "═══ WALK NATURAL (SMOOTH VERTICAL) ═══")
+Sect(tcol, "═══ WALK NATURAL (VERTICAL) ═══")
 Toggle(tcol, "Enable Walk Natural", false, function(v)
     State.WalkNaturalEnabled = v
-    if v then NotifyUser("Walk Natural", "Noclip + Smooth Vertical aktif", "success") end
+    if v then NotifyUser("Walk Natural", "Noclip + Vertical aktif", "success") end
 end)
-Slider(tcol, "Vertical Speed (stud/s)", 5, 100, 30, function(v) State.WalkVerticalSpeed = v end)
-Slider(tcol, "Smoothness (ms)", 10, 300, 50, function(v) State.WalkVerticalSmoothness = v / 1000 end)
+Dropdown(tcol, "Vertical Method", {"tween", "step"}, State.WalkVertMode, function(v)
+    State.WalkVertMode = v
+    NotifyUser("Vertical Mode", v:upper(), "success")
+end)
+Slider(tcol, "Tween Duration (ms)", 100, 2000, 500, function(v) State.WalkTweenDuration = v / 1000 end)
+Slider(tcol, "Tween Delay (ms)", 0, 500, 100, function(v) State.WalkTweenDelay = v / 1000 end)
 Slider(tcol, "Detect Range (stud)", 5, 60, 25, function(v) State.WalkHorizontalRange = v end)
+Slider(tcol, "Step Speed (stud/s)", 5, 100, 30, function(v) State.WalkVerticalSpeed = v end)
+Slider(tcol, "Step Smoothness (ms)", 10, 300, 50, function(v) State.WalkVerticalSmoothness = v / 1000 end)
 
-Sect(tcol, "═══ COLLECT V1 ═══")
-Toggle(tcol, "Enable Collect V1", false, function(v) State.CollectV1Enabled = v end)
-Dropdown(tcol, "V1 Mode", {"walk"}, State.CollectMode, function(v)
-    State.CollectMode = v
-    NotifyUser("V1 Mode", v, "success")
+Sect(tcol, "═══ AUTO COLLECT CANDY ═══")
+Toggle(tcol, "Auto Collect Candy", false, function(v) State.AutoCollectCandy = v end)
+Dropdown(tcol, "Candy Method", {"walk", "path"}, State.CandyMethod, function(v)
+    State.CandyMethod = v
+    NotifyUser("Candy Method", v:upper(), "success")
 end)
-Slider(tcol, "V1 Interval", 1, 10, 2, function(v) State.CollectInterval = v end)
-Slider(tcol, "V1 Walk Speed", 16, 80, 32, function(v) State.WalkSpeed = v end)
+Slider(tcol, "Candy Interval", 1, 10, 2, function(v) State.CandyInterval = v end)
+Slider(tcol, "Candy Walk Speed", 16, 80, 32, function(v) State.CandyWalkSpeed = v end)
+Slider(tcol, "Candy Timeout (s)", 30, 300, 120, function(v) State.CandyTimeout = v end)
 
-Sect(tcol, "═══ COLLECT V2 ═══")
-Toggle(tcol, "Enable Collect V2", false, function(v) State.CollectV2Enabled = v end)
-Dropdown(tcol, "V2 Mode", {"path", "move", "align", "walkpoint", "walkpart"}, State.CollectV2Mode, function(v)
-    State.CollectV2Mode = v
-    NotifyUser("V2 Mode", v, "success")
+Sect(tcol, "═══ AUTO COLLECT PUMPKIN ═══")
+Toggle(tcol, "Auto Collect Pumpkin", false, function(v) State.AutoCollectPumpkin = v end)
+Dropdown(tcol, "Pumpkin Method", {"walk", "path"}, State.PumpkinMethod, function(v)
+    State.PumpkinMethod = v
+    NotifyUser("Pumpkin Method", v:upper(), "success")
 end)
-Slider(tcol, "V2 Interval", 1, 10, 2, function(v) State.CollectV2Interval = v end)
-Slider(tcol, "V2 Walk Speed", 16, 80, 32, function(v) State.CollectV2WalkSpeed = v end)
-Slider(tcol, "V2 Timeout (s)", 30, 300, 120, function(v) State.CollectV2Timeout = v end)
-
-Sect(tcol, "═══ PUMPKIN ═══")
-Toggle(tcol, "Auto Collect Pumpkin", false, function(v) State.PumpkinEnabled = v end)
 Slider(tcol, "Pumpkin Interval", 1, 10, 2, function(v) State.PumpkinInterval = v end)
 
 Sect(tcol, "METHOD")
@@ -2026,26 +2057,26 @@ Toggle(te, "Show Distance", false, function(v) State.ShowDistance = v end)
 local tEv = tabContent.EVENT
 Sect(tEv, "EVENT TIMER")
 local eventCard = Instance.new("Frame", tEv)
-eventCard.Size = UDim2.new(1,-4,0,80)
+eventCard.Size = UDim2.new(1,-4,0,88)
 eventCard.BackgroundColor3 = C.Card
 eventCard.BackgroundTransparency = 0.2
 eventCard.BorderSizePixel = 0
 eventCard.ZIndex = 10
 Instance.new("UICorner", eventCard).CornerRadius = UDim.new(0,10)
 local eventTimerLbl = Instance.new("TextLabel", eventCard)
-eventTimerLbl.Size = UDim2.new(1,-10,0,32)
+eventTimerLbl.Size = UDim2.new(1,-10,0,36)
 eventTimerLbl.Position = UDim2.new(0,5,0,8)
 eventTimerLbl.BackgroundTransparency = 1
 eventTimerLbl.Text = "00:00:00"
 eventTimerLbl.TextColor3 = C.Pri
-eventTimerLbl.TextSize = 24
+eventTimerLbl.TextSize = 26
 eventTimerLbl.Font = Enum.Font.GothamBold
 eventTimerLbl.TextXAlignment = Enum.TextXAlignment.Center
 eventTimerLbl.ZIndex = 11
 track(eventTimerLbl, "TextColor3")
 local eventProgressBg = Instance.new("Frame", eventCard)
-eventProgressBg.Size = UDim2.new(1,-16,0,6)
-eventProgressBg.Position = UDim2.new(0,8,0,48)
+eventProgressBg.Size = UDim2.new(1,-16,0,8)
+eventProgressBg.Position = UDim2.new(0,8,0,52)
 eventProgressBg.BackgroundColor3 = Color3.fromRGB(60,60,68)
 eventProgressBg.BorderSizePixel = 0
 eventProgressBg.ZIndex = 11
@@ -2058,74 +2089,78 @@ eventProgressFill.ZIndex = 12
 Instance.new("UICorner", eventProgressFill).CornerRadius = UDim.new(1,0)
 track(eventProgressFill, "BackgroundColor3")
 local eventStatusLbl = Instance.new("TextLabel", eventCard)
-eventStatusLbl.Size = UDim2.new(1,-10,0,14)
-eventStatusLbl.Position = UDim2.new(0,5,0,60)
+eventStatusLbl.Size = UDim2.new(1,-10,0,16)
+eventStatusLbl.Position = UDim2.new(0,5,0,66)
 eventStatusLbl.BackgroundTransparency = 1
 eventStatusLbl.Text = "Next: --"
 eventStatusLbl.TextColor3 = C.Dim
-eventStatusLbl.TextSize = 10
+eventStatusLbl.TextSize = 11
 eventStatusLbl.Font = Enum.Font.GothamMedium
 eventStatusLbl.TextXAlignment = Enum.TextXAlignment.Center
 eventStatusLbl.ZIndex = 11
 
 Sect(tEv, "JAM DIGITAL")
 local clockCard = Instance.new("Frame", tEv)
-clockCard.Size = UDim2.new(1,-4,0,60)
+clockCard.Size = UDim2.new(1,-4,0,68)
 clockCard.BackgroundColor3 = C.Card
 clockCard.BackgroundTransparency = 0.2
 clockCard.BorderSizePixel = 0
 clockCard.ZIndex = 10
 Instance.new("UICorner", clockCard).CornerRadius = UDim.new(0,10)
 local clockLbl2 = Instance.new("TextLabel", clockCard)
-clockLbl2.Size = UDim2.new(1,-10,0,30)
-clockLbl2.Position = UDim2.new(0,5,0,6)
+clockLbl2.Size = UDim2.new(1,-10,0,32)
+clockLbl2.Position = UDim2.new(0,5,0,8)
 clockLbl2.BackgroundTransparency = 1
 clockLbl2.Text = "--:--:--"
 clockLbl2.TextColor3 = C.Cyn
-clockLbl2.TextSize = 22
+clockLbl2.TextSize = 24
 clockLbl2.Font = Enum.Font.GothamBold
 clockLbl2.TextXAlignment = Enum.TextXAlignment.Center
 clockLbl2.ZIndex = 11
 local dateLbl2 = Instance.new("TextLabel", clockCard)
-dateLbl2.Size = UDim2.new(1,-10,0,16)
-dateLbl2.Position = UDim2.new(0,5,0,38)
+dateLbl2.Size = UDim2.new(1,-10,0,18)
+dateLbl2.Position = UDim2.new(0,5,0,42)
 dateLbl2.BackgroundTransparency = 1
 dateLbl2.Text = "--"
 dateLbl2.TextColor3 = C.Dim
-dateLbl2.TextSize = 10
+dateLbl2.TextSize = 11
 dateLbl2.Font = Enum.Font.Gotham
 dateLbl2.TextXAlignment = Enum.TextXAlignment.Center
 dateLbl2.ZIndex = 11
 
 Sect(tEv, "STATISTIK")
+
 local function mkStatRow(parent, title, color)
     local bx = Instance.new("Frame", parent)
-    bx.Size = UDim2.new(1,-4,0,36)
+    bx.Size = UDim2.new(1,-4,0,40)
     bx.BackgroundColor3 = C.Card
     bx.BackgroundTransparency = 0.2
     bx.BorderSizePixel = 0
     bx.ZIndex = 10
     Instance.new("UICorner", bx).CornerRadius = UDim.new(0,10)
     local t = Instance.new("TextLabel", bx)
-    t.Size = UDim2.new(0.5,0,1,0)
+    t.Size = UDim2.new(0.55,0,1,0)
     t.BackgroundTransparency = 1
     t.Text = title; t.TextColor3 = C.Dim
-    t.TextSize = 10; t.Font = Enum.Font.GothamMedium
+    t.TextSize = 11; t.Font = Enum.Font.GothamMedium
     t.TextXAlignment = Enum.TextXAlignment.Left; t.ZIndex = 11
-    t.Position = UDim2.fromOffset(10,0)
+    t.Position = UDim2.fromOffset(12,0)
     local v = Instance.new("TextLabel", bx)
-    v.Size = UDim2.new(0.5,-10,1,0)
-    v.Position = UDim2.new(0.5,0,0,0)
+    v.Size = UDim2.new(0.45,-10,1,0)
+    v.Position = UDim2.new(0.55,0,0,0)
     v.BackgroundTransparency = 1
     v.Text = "0"; v.TextColor3 = color
     v.TextSize = 16; v.Font = Enum.Font.GothamBold
     v.TextXAlignment = Enum.TextXAlignment.Right; v.ZIndex = 11
     return v
 end
-local statCollectedVal = mkStatRow(tEv, "Item Collected", C.Grn)
-local statSpawnVal = mkStatRow(tEv, "Item Spawn", C.Pri)
+
+local statCandyColVal = mkStatRow(tEv, "Candy Collected", C.Grn)
+local statCandyAttVal = mkStatRow(tEv, "Candy Attempts", C.Pri)
+local statCandyFoundVal = mkStatRow(tEv, "Candy On Map", C.Cyn)
 local statPumpkinColVal = mkStatRow(tEv, "Pumpkin Collected", C.Orng)
-local statPumpkinSpawnVal = mkStatRow(tEv, "Pumpkin Spawn", C.Yel)
+local statPumpkinAttVal = mkStatRow(tEv, "Pumpkin Attempts", C.Yel)
+local statPumpkinFoundVal = mkStatRow(tEv, "Pumpkin On Map", C.Pur)
 local statVertVal = mkStatRow(tEv, "Vertical Steps", C.Cyn)
 local statMoveBlock = mkStatRow(tEv, "Movement Block", C.Red)
 
@@ -2150,10 +2185,12 @@ task.spawn(function()
                 eventTimerLbl.TextColor3 = C.Pri
                 eventStatusLbl.TextColor3 = C.Dim
             end
-            statCollectedVal.Text = tostring(StatsData.ItemsCollected)
-            statSpawnVal.Text = tostring(StatsData.ItemsSpawned)
+            statCandyColVal.Text = tostring(StatsData.ItemsCollected)
+            statCandyAttVal.Text = tostring(StatsData.ItemsAttempted)
+            statCandyFoundVal.Text = tostring(StatsData.ItemsFound)
             statPumpkinColVal.Text = tostring(StatsData.PumpkinsCollected)
-            statPumpkinSpawnVal.Text = tostring(StatsData.PumpkinsSpawned)
+            statPumpkinAttVal.Text = tostring(StatsData.PumpkinsAttempted)
+            statPumpkinFoundVal.Text = tostring(StatsData.PumpkinsFound)
             statVertVal.Text = tostring(StatsData.VerticalSteps)
             statMoveBlock.Text = tostring(AntiDetect.MovementBlocked)
         end)
@@ -2229,7 +2266,7 @@ Sect(ttem, "BACKGROUND IMAGE")
 local themeBtns = {}
 for i, bg in ipairs(BG_LIST) do
     local b = Instance.new("TextButton", ttem)
-    b.Size = UDim2.new(1,-4,0,44)
+    b.Size = UDim2.new(1,-4,0,52)
     b.BackgroundColor3 = C.Card
     b.BackgroundTransparency = 0.25
     b.BorderSizePixel = 0
@@ -2244,30 +2281,30 @@ for i, bg in ipairs(BG_LIST) do
     s.Parent = b
     trackSearch(b, "Theme " .. bg.name)
     local prev = Instance.new("ImageLabel", b)
-    prev.Size = UDim2.new(0,36,0,36)
-    prev.Position = UDim2.new(0,6,0.5,-18)
+    prev.Size = UDim2.new(0,42,0,42)
+    prev.Position = UDim2.new(0,8,0.5,-21)
     prev.BackgroundColor3 = Color3.fromRGB(55,55,63)
     prev.BorderSizePixel = 0
     prev.Image = bg.id
     prev.ZIndex = 12
-    Instance.new("UICorner", prev).CornerRadius = UDim.new(0,7)
+    Instance.new("UICorner", prev).CornerRadius = UDim.new(0,8)
     local lbl = Instance.new("TextLabel", b)
-    lbl.Size = UDim2.new(1,-86,0,14)
-    lbl.Position = UDim2.new(0,48,0,8)
+    lbl.Size = UDim2.new(1,-96,0,16)
+    lbl.Position = UDim2.new(0,58,0,10)
     lbl.BackgroundTransparency = 1
     lbl.Text = i .. ". " .. bg.name
     lbl.TextColor3 = (i == S.selBG) and C.Pri or C.Txt
-    lbl.TextSize = 11
+    lbl.TextSize = 12
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 12
     local chk = Instance.new("TextLabel", b)
-    chk.Size = UDim2.new(0,24,1,0)
-    chk.Position = UDim2.new(1,-28,0,0)
+    chk.Size = UDim2.new(0,28,1,0)
+    chk.Position = UDim2.new(1,-32,0,0)
     chk.BackgroundTransparency = 1
     chk.Text = (i == S.selBG) and "V" or ""
     chk.TextColor3 = C.Pri
-    chk.TextSize = 16
+    chk.TextSize = 18
     chk.Font = Enum.Font.GothamBold
     chk.ZIndex = 12
     themeBtns[i] = {btn=b, stroke=s, lbl=lbl, chk=chk}
@@ -2294,22 +2331,22 @@ end, Color3.fromRGB(60,120,90))
 
 Sect(ttem, "WARNA UI")
 local hueFrame = Instance.new("Frame", ttem)
-hueFrame.Size = UDim2.new(1,-4,0,60)
+hueFrame.Size = UDim2.new(1,-4,0,68)
 hueFrame.BackgroundColor3 = C.Card
 hueFrame.BackgroundTransparency = 0.25
 hueFrame.BorderSizePixel = 0
 hueFrame.ZIndex = 10
 Instance.new("UICorner", hueFrame).CornerRadius = UDim.new(0,10)
 local huePrev = Instance.new("Frame", hueFrame)
-huePrev.Size = UDim2.new(0,18,0,18)
-huePrev.Position = UDim2.new(1,-30,0,4)
+huePrev.Size = UDim2.new(0,20,0,20)
+huePrev.Position = UDim2.new(1,-34,0,6)
 huePrev.BackgroundColor3 = Color3.fromHSV(0.08, 0.65, 0.95)
 huePrev.BorderSizePixel = 0
 huePrev.ZIndex = 12
 Instance.new("UICorner", huePrev).CornerRadius = UDim.new(1,0)
 local hueBar = Instance.new("Frame", hueFrame)
-hueBar.Size = UDim2.new(1,-20,0,22)
-hueBar.Position = UDim2.new(0,10,0,28)
+hueBar.Size = UDim2.new(1,-20,0,26)
+hueBar.Position = UDim2.new(0,10,0,32)
 hueBar.BackgroundColor3 = Color3.fromRGB(255,255,255)
 hueBar.BorderSizePixel = 0
 hueBar.ZIndex = 11
@@ -2326,8 +2363,8 @@ hueGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 90, 90)),
 })
 local hueKnob = Instance.new("Frame", hueBar)
-hueKnob.Size = UDim2.new(0,24,0,24)
-hueKnob.Position = UDim2.new(0.08, -12, 0.5, -12)
+hueKnob.Size = UDim2.new(0,26,0,26)
+hueKnob.Position = UDim2.new(0.08, -13, 0.5, -13)
 hueKnob.BackgroundColor3 = Color3.fromRGB(255,255,255)
 hueKnob.BorderSizePixel = 0
 hueKnob.ZIndex = 13
@@ -2338,7 +2375,7 @@ local function updateHue(px)
     local bs = hueBar.AbsoluteSize.X
     if bs <= 0 then return end
     local pct = math.clamp((px - hueBar.AbsolutePosition.X)/bs, 0, 1)
-    hueKnob.Position = UDim2.new(pct, -12, 0.5, -12)
+    hueKnob.Position = UDim2.new(pct, -13, 0.5, -13)
     local col = Color3.fromHSV(pct, 0.65, 0.98)
     huePrev.BackgroundColor3 = col
     S.HueColor = col
@@ -2372,7 +2409,7 @@ end)
 -- FILL CREDITS
 local tcr = tabContent.CREDITS
 local creditCard = Instance.new("Frame", tcr)
-creditCard.Size = UDim2.new(1,-4,0,130)
+creditCard.Size = UDim2.new(1,-4,0,140)
 creditCard.BackgroundColor3 = C.Card
 creditCard.BackgroundTransparency = 0.25
 creditCard.BorderSizePixel = 0
@@ -2382,38 +2419,38 @@ local ccS = Instance.new("UIStroke", creditCard)
 ccS.Color = C.Pri; ccS.Thickness = 1; ccS.Transparency = 0.7; ccS.Parent = creditCard
 track(ccS, "Color")
 local creditLogo = Instance.new("ImageLabel", creditCard)
-creditLogo.Size = UDim2.new(0, 56, 0, 56)
-creditLogo.Position = UDim2.new(0.5, -28, 0, 10)
+creditLogo.Size = UDim2.new(0, 60, 0, 60)
+creditLogo.Position = UDim2.new(0.5, -30, 0, 12)
 creditLogo.BackgroundTransparency = 1
 creditLogo.Image = CONFIG.LOGO
 creditLogo.ZIndex = 12
 local creditTitle = Instance.new("TextLabel", creditCard)
-creditTitle.Size = UDim2.new(1, -20, 0, 22)
-creditTitle.Position = UDim2.new(0, 10, 0, 70)
+creditTitle.Size = UDim2.new(1, -20, 0, 24)
+creditTitle.Position = UDim2.new(0, 10, 0, 78)
 creditTitle.BackgroundTransparency = 1
 creditTitle.RichText = true
 creditTitle.Text = '<font color="rgb(255,255,255)">Oc1Dv</font><font color="rgb(255,145,80)">HUB</font>'
-creditTitle.TextSize = 18
+creditTitle.TextSize = 20
 creditTitle.Font = Enum.Font.GothamBlack
 creditTitle.TextXAlignment = Enum.TextXAlignment.Center
 creditTitle.ZIndex = 12
 local creditSub = Instance.new("TextLabel", creditCard)
-creditSub.Size = UDim2.new(1, -20, 0, 16)
-creditSub.Position = UDim2.new(0, 10, 0, 94)
+creditSub.Size = UDim2.new(1, -20, 0, 18)
+creditSub.Position = UDim2.new(0, 10, 0, 102)
 creditSub.BackgroundTransparency = 1
 creditSub.Text = "MOURGE SHIFT HALLOWEEN EDITION"
 creditSub.TextColor3 = C.Dim
-creditSub.TextSize = 10
+creditSub.TextSize = 11
 creditSub.Font = Enum.Font.GothamMedium
 creditSub.TextXAlignment = Enum.TextXAlignment.Center
 creditSub.ZIndex = 12
 local creditMade = Instance.new("TextLabel", creditCard)
-creditMade.Size = UDim2.new(1, -20, 0, 14)
-creditMade.Position = UDim2.new(0, 10, 0, 112)
+creditMade.Size = UDim2.new(1, -20, 0, 16)
+creditMade.Position = UDim2.new(0, 10, 0, 120)
 creditMade.BackgroundTransparency = 1
 creditMade.Text = "(c) 2026 - All rights reserved"
 creditMade.TextColor3 = C.Dim
-creditMade.TextSize = 9
+creditMade.TextSize = 10
 creditMade.Font = Enum.Font.Gotham
 creditMade.TextXAlignment = Enum.TextXAlignment.Center
 creditMade.ZIndex = 12
@@ -2421,7 +2458,7 @@ creditMade.ZIndex = 12
 Sect(tcr, "SOCIAL MEDIA")
 local function mkSocBtn(name, handle, color, url)
     local b = Instance.new("TextButton", tcr)
-    b.Size = UDim2.new(1,-4,0,36)
+    b.Size = UDim2.new(1,-4,0,40)
     b.BackgroundColor3 = color
     b.BackgroundTransparency = 0.15
     b.BorderSizePixel = 0
@@ -2432,21 +2469,21 @@ local function mkSocBtn(name, handle, color, url)
     trackSearch(b, name)
     local t = Instance.new("TextLabel", b)
     t.Size = UDim2.new(0.4,0,1,0)
-    t.Position = UDim2.fromOffset(12,0)
+    t.Position = UDim2.fromOffset(14,0)
     t.BackgroundTransparency = 1
     t.Text = name:upper()
     t.TextColor3 = Color3.fromRGB(255,255,255)
-    t.TextSize = 11
+    t.TextSize = 12
     t.Font = Enum.Font.GothamBold
     t.TextXAlignment = Enum.TextXAlignment.Left
     t.ZIndex = 11
     local v = Instance.new("TextLabel", b)
-    v.Size = UDim2.new(0.6,-12,1,0)
+    v.Size = UDim2.new(0.6,-14,1,0)
     v.Position = UDim2.new(0.4,0,0,0)
     v.BackgroundTransparency = 1
     v.Text = handle
     v.TextColor3 = Color3.fromRGB(230,230,240)
-    v.TextSize = 10
+    v.TextSize = 11
     v.Font = Enum.Font.GothamMedium
     v.TextXAlignment = Enum.TextXAlignment.Right
     v.TextTruncate = Enum.TextTruncate.AtEnd
@@ -2470,6 +2507,6 @@ UIS.InputBegan:Connect(function(i, g)
     end
 end)
 
-Log("FINAL V4 loaded", "success")
-NotifyUser("Oc1DvHUB", "FINAL V4 loaded!", "success")
-print("[Oc1DvHUB] FINAL V4 loaded ✅")
+Log("FINAL V9 loaded", "success")
+NotifyUser("Oc1DvHUB", "FINAL V9 loaded!", "success")
+print("[Oc1DvHUB] FINAL V9 loaded ✅")
