@@ -1,8 +1,10 @@
---[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — ULTIMATE FINAL
-     Modes: walk (pathfinding), fly, tween, lerp
-     Anti-Detect: Kick/Remote/Script blocker + Movement monitor (aktif saat collect)
+--[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — FINAL V4
+     Walk Natural: Noclip + Smooth Vertical (auto naik/turun ke target)
+     Collect V1 & V2, Pumpkin, ESP, Event, Misc, Tema, Credits
+     Full map scan, unlimited distance, anti-detect
+     Semua toggle default OFF
 ]]
-print("[Oc1DvHUB] Loading ULTIMATE FINAL...")
+print("[Oc1DvHUB] Loading FINAL V4...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -92,27 +94,32 @@ local NotifyUser, Log
 -- STATE
 -- ═══════════════════════════════════════════════════════════
 local State = {
+    CollectV1Enabled = false,
     CollectMode = "walk",
-    AutoCollect = true,
-    CollectInterval = 1.5,
-    MaxDistance = 500,
-    MaxPerCycle = 5,
+    CollectInterval = 2,
     WalkSpeed = 32,
-    TweenDuration = 1.0,
-    LerpSteps = 20,
-    LerpStepDelay = 0.02,
 
-    AutoCollectPumpkin = true,
-    PumpkinInterval = 1.5,
-    PumpkinMaxDistance = 500,
-    PumpkinMaxPerCycle = 5,
+    CollectV2Enabled = false,
+    CollectV2Mode = "path",
+    CollectV2Interval = 2,
+    CollectV2WalkSpeed = 32,
+    CollectV2Timeout = 120,
 
-    ItemESP = true, PumpkinESP = true, ReaperESP = true, GhostESP = false,
-    ShowDistance = true,
+    PumpkinEnabled = false,
+    PumpkinInterval = 2,
 
-    FirePrompt = true, NoDelay = true,
+    -- WALK NATURAL
+    WalkNaturalEnabled = false,
+    WalkVerticalSpeed = 30,
+    WalkVerticalSmoothness = 0.05,
+    WalkHorizontalRange = 25,
 
-    AntiAFK = true, AntiAFKInterval = 90,
+    ItemESP = false, PumpkinESP = false, ReaperESP = false, GhostESP = false,
+    ShowDistance = false,
+
+    FirePrompt = false, NoDelay = false,
+
+    AntiAFK = false, AntiAFKInterval = 90,
 
     GodMode = false, DesyncRadius = 30, DesyncTPDistance = 500,
 
@@ -127,48 +134,12 @@ local StatsData = {
     ItemsFound = 0, ItemsCollected = 0, ItemsSpawned = 0,
     PumpkinsFound = 0, PumpkinsCollected = 0, PumpkinsSpawned = 0,
     ReapersFound = 0, GhostsFound = 0, AFKTicks = 0, DesyncCount = 0,
+    VerticalSteps = 0,
 }
 
 local itemCache, pumpkinCache, reaperCache, ghostCache = {}, {}, {}, {}
 local countedItems, countedPumpkins = {}, {}
 local lastSeenItems, lastSeenPumpkins = {}, {}
-
--- ═══════════════════════════════════════════════════════════
--- TP LOCATIONS
--- ═══════════════════════════════════════════════════════════
-local TP_LOCATIONS = {
-    {name = "Ambil Jenazah", pos = Vector3.new(56.62, 4.65, -70.89), category = "LOBBY BAWAH"},
-    {name = "Autopsy Room", pos = Vector3.new(72.55, 4.65, -57.78), category = "LOBBY BAWAH"},
-    {name = "Cremation Room", pos = Vector3.new(36.62, 4.65, -55.07), category = "LOBBY BAWAH"},
-    {name = "Morgue / Freeze Room", pos = Vector3.new(22.62, 4.65, -38.59), category = "LOBBY BAWAH"},
-    {name = "Sterilization Room", pos = Vector3.new(89.32, 4.65, -43.71), category = "LOBBY BAWAH"},
-    {name = "Storage Room", pos = Vector3.new(78.08, 17.65, -37.13), category = "LOBBY ATAS"},
-    {name = "Embalming Room", pos = Vector3.new(32.42, 17.65, -24.84), category = "LOBBY ATAS"},
-    {name = "Electric Room", pos = Vector3.new(28.48, 17.65, -58.53), category = "LOBBY ATAS"},
-    {name = "Tempat Berduka", pos = Vector3.new(56.73, 17.75, -40.54), category = "LOBBY ATAS"},
-    {name = "Kamar 101", pos = Vector3.new(28.42, 30.65, -69.55), category = "LANTAI 1"},
-    {name = "Kamar 102", pos = Vector3.new(45.02, 30.65, -69.68), category = "LANTAI 1"},
-    {name = "Kamar 103", pos = Vector3.new(69.10, 30.65, -68.18), category = "LANTAI 1"},
-    {name = "Kamar 104", pos = Vector3.new(85.81, 30.65, -69.92), category = "LANTAI 1"},
-    {name = "Kamar 105", pos = Vector3.new(83.51, 30.65, -43.62), category = "LANTAI 1"},
-    {name = "Kamar 106", pos = Vector3.new(69.65, 30.65, -42.30), category = "LANTAI 1"},
-    {name = "Kamar 107", pos = Vector3.new(43.51, 30.65, -42.08), category = "LANTAI 1"},
-    {name = "Kamar 108", pos = Vector3.new(28.18, 30.65, -41.82), category = "LANTAI 1"},
-    {name = "Kamar 201", pos = Vector3.new(29.22, 43.65, -70.04), category = "LANTAI 2"},
-    {name = "Kamar 202", pos = Vector3.new(45.28, 43.65, -69.55), category = "LANTAI 2"},
-    {name = "Kamar 203", pos = Vector3.new(70.57, 43.65, -69.77), category = "LANTAI 2"},
-    {name = "Kamar 204", pos = Vector3.new(86.70, 43.65, -70.00), category = "LANTAI 2"},
-    {name = "Kamar 205", pos = Vector3.new(42.23, 43.65, -41.67), category = "LANTAI 2"},
-    {name = "Kamar 206", pos = Vector3.new(27.39, 43.65, -41.69), category = "LANTAI 2"},
-    {name = "Archives Room", pos = Vector3.new(43.78, 56.65, -27.24), category = "LANTAI 3"},
-    {name = "Kamar 301", pos = Vector3.new(30.26, 56.65, -69.43), category = "LANTAI 3"},
-    {name = "Kamar 302", pos = Vector3.new(45.47, 56.65, -69.29), category = "LANTAI 3"},
-    {name = "Kamar 303", pos = Vector3.new(70.20, 56.65, -70.11), category = "LANTAI 3"},
-    {name = "Kamar 304", pos = Vector3.new(86.42, 56.65, -69.70), category = "LANTAI 3"},
-    {name = "Kamar 305", pos = Vector3.new(42.37, 56.65, -41.27), category = "LANTAI 3"},
-    {name = "Kamar 306", pos = Vector3.new(26.33, 56.65, -42.68), category = "LANTAI 3"},
-    {name = "Lantai 4", pos = Vector3.new(58.29, 69.65, -22.85), category = "LANTAI 4"},
-}
 
 -- ═══════════════════════════════════════════════════════════
 -- HELPERS
@@ -223,7 +194,7 @@ task.spawn(function()
                         p.LocalTransparencyModifier = 0
                         p.Transparency = 0
                     end
-                    if State.Noclip or State.Invisible or State.Fly then
+                    if State.Noclip or State.Invisible or State.Fly or State.WalkNaturalEnabled then
                         p.CanCollide = false
                     else
                         p.CanCollide = true
@@ -280,18 +251,16 @@ LP.CharacterAdded:Connect(function()
     if State.Fly then startFly() end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- ANTI-DETECT SYSTEM
--- ═══════════════════════════════════════════════════════════
+-- ANTI-DETECT
 local AntiDetect = {
     Enabled = true,
-    Running = false,           -- aktif saat collect berjalan
+    Running = false,
     ScriptsDisabled = 0,
     KicksBlocked = 0,
     RemotesBlocked = 0,
     MovementBlocked = 0,
-    MaxTPDistance = 40,
-    MaxSpeed = 60,
+    MaxTPDistance = 80,
+    MaxSpeed = 100,
     lastPos = nil,
     lastTime = nil,
 }
@@ -301,7 +270,6 @@ local DETECT_KEYWORDS = {
     "flag","ban","kick","admin","cheat","hack","exploit","suspicious",
     "monitor","watch","sentry","guardian","speedcheck","positioncheck",
 }
-
 local function isDetectionName(name)
     local low = tostring(name):lower()
     for _, kw in ipairs(DETECT_KEYWORDS) do
@@ -310,7 +278,6 @@ local function isDetectionName(name)
     return false
 end
 
--- Hook Kick
 pcall(function()
     if type(hookfunction) == "function" then
         hookfunction(LP.Kick, function(self, ...)
@@ -322,7 +289,6 @@ pcall(function()
     end
 end)
 
--- Hook namecall (Kick + Remote deteksi)
 pcall(function()
     if type(hookmetamethod) == "function" then
         local old
@@ -346,7 +312,6 @@ pcall(function()
     end
 end)
 
--- Disable LocalScript deteksi
 local function disableDetectionScripts(parent)
     if not AntiDetect.Enabled then return end
     for _, obj in ipairs(parent:GetDescendants()) do
@@ -376,7 +341,6 @@ LP.DescendantAdded:Connect(function(obj)
     end
 end)
 
--- MOVEMENT ANTI-DETECT (aktif saat collect)
 task.spawn(function()
     while true do
         RunService.Heartbeat:Wait()
@@ -389,12 +353,10 @@ task.spawn(function()
         if not hrp then continue end
         local now = tick()
         local pos = hrp.Position
-
         if AntiDetect.lastPos and AntiDetect.lastTime then
             local deltaDist = (pos - AntiDetect.lastPos).Magnitude
             local deltaTime = now - AntiDetect.lastTime
             local speed = deltaTime > 0 and (deltaDist / deltaTime) or 0
-
             if deltaDist > AntiDetect.MaxTPDistance then
                 AntiDetect.MovementBlocked += 1
                 pcall(function() hrp.CFrame = CFrame.new(AntiDetect.lastPos) end)
@@ -408,14 +370,13 @@ task.spawn(function()
     end
 end)
 
--- Protect GUI
 pcall(function()
     if syn and syn.protect_gui then syn.protect_gui(pg) end
     if protect_gui then protect_gui(pg) end
 end)
 
 -- ═══════════════════════════════════════════════════════════
--- KEYWORDS
+-- KEYWORDS + SCAN
 -- ═══════════════════════════════════════════════════════════
 local ITEM_KEYWORDS = {
     "trickortreatitem","trickortreat","trick_or_treat","trick","treat",
@@ -461,25 +422,16 @@ end
 local function scanByKeyword(keywords, blacklist)
     local found, seen = {}, {}
     pcall(function()
-        for _, child in ipairs(workspace:GetChildren()) do
-            if checkName(child.Name, keywords, blacklist) then
-                local part = extractPart(child)
-                if part and not seen[child] then
-                    seen[child] = true
-                    table.insert(found, {model = child, part = part, name = child.Name})
-                end
-            end
-            if child:IsA("Model") or child:IsA("Folder") then
-                for _, sub in ipairs(child:GetDescendants()) do
-                    if checkName(sub.Name, keywords, blacklist) then
-                        local part = extractPart(sub)
-                        if part then
-                            local root = part:FindFirstAncestorOfClass("Model") or sub
-                            if not seen[root] then
-                                seen[root] = true
-                                table.insert(found, {model = root, part = part, name = sub.Name})
-                            end
-                        end
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if not obj.Parent then continue end
+            if seen[obj] then continue end
+            if checkName(obj.Name, keywords, blacklist) then
+                local part = extractPart(obj)
+                if part and part.Parent then
+                    local root = part:FindFirstAncestorOfClass("Model") or obj
+                    if not seen[root] then
+                        seen[root] = true
+                        table.insert(found, {model = root, part = part, name = obj.Name, source = obj})
                     end
                 end
             end
@@ -542,31 +494,88 @@ local function scanGhosts()
 end
 
 -- ═══════════════════════════════════════════════════════════
--- MOVEMENT METHODS
+-- WALK NATURAL: Smooth Vertical (naik/turun ke target)
 -- ═══════════════════════════════════════════════════════════
+local lastVertStep = 0
+task.spawn(function()
+    while true do
+        RunService.Heartbeat:Wait()
+        if not State.WalkNaturalEnabled or not hasCharacter() then continue end
+        local hum = getHum()
+        local hrp = getHRP()
+        if not hum or not hrp then continue end
 
--- Walk pakai Pathfinding (hindari tembok)
+        -- Noclip
+        for _, p in ipairs(LP.Character:GetChildren()) do
+            if p:IsA("BasePart") and p.CanCollide then
+                p.CanCollide = false
+            end
+        end
+
+        local now = tick()
+        if now - lastVertStep < State.WalkVerticalSmoothness then continue end
+        lastVertStep = now
+
+        -- Kumpulkan target
+        local checkList = {}
+        if State.CollectV1Enabled or State.CollectV2Enabled then
+            for _, d in ipairs(scanItems()) do table.insert(checkList, d) end
+        end
+        if State.PumpkinEnabled then
+            for _, d in ipairs(scanPumpkins()) do table.insert(checkList, d) end
+        end
+
+        -- Target terdekat
+        local nearest, nearestDist = nil, math.huge
+        for _, d in ipairs(checkList) do
+            if d.part and d.part.Parent then
+                local dist = (d.part.Position - hrp.Position).Magnitude
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearest = d
+                end
+            end
+        end
+        if not nearest then continue end
+
+        local targetPos = nearest.part.Position
+        local myPos = hrp.Position
+        local relY = targetPos.Y - myPos.Y
+        local dx = targetPos.X - myPos.X
+        local dz = targetPos.Z - myPos.Z
+        local distXZ = math.sqrt(dx*dx + dz*dz)
+
+        -- Kalau target dalam jangkauan horizontal dan beda Y signifikan
+        if distXZ < State.WalkHorizontalRange and math.abs(relY) > 1 then
+            local step = State.WalkVerticalSpeed * State.WalkVerticalSmoothness
+            if step > math.abs(relY) then step = math.abs(relY) end
+            local dir = relY > 0 and 1 or -1
+            pcall(function()
+                hrp.CFrame = hrp.CFrame + Vector3.new(0, step * dir, 0)
+            end)
+            StatsData.VerticalSteps += 1
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════
+-- WALK TO TARGET (pathfinding + vertical smooth kalau perlu)
+-- ═══════════════════════════════════════════════════════════
 local function walkToTarget(targetPart, timeout)
-    timeout = timeout or 8
+    timeout = timeout or 120
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
     local hrp, hum = getHRP(), getHum()
     if not hrp or not hum then return false end
-
     local oldSpeed = hum.WalkSpeed
     hum.WalkSpeed = State.WalkSpeed
-
     local success = false
     local startTime = tick()
 
-    -- Pathfinding
     local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        AgentCanClimb = true,
-        WaypointSpacing = 4,
+        AgentRadius = 2, AgentHeight = 5,
+        AgentCanJump = true, AgentCanClimb = true,
+        WaypointSpacing = 8,
     })
-
     local ok = pcall(function()
         path:ComputeAsync(hrp.Position, targetPart.Position)
     end)
@@ -578,105 +587,221 @@ local function walkToTarget(targetPart, timeout)
             if not hasCharacter() or not targetPart.Parent then break end
             local h = getHRP()
             if not h then break end
-
             if wp.Action == Enum.PathWaypointAction.Jump then
                 pcall(function() hum.Jump = true end)
+                task.wait(0.2)
             end
-
             pcall(function() hum:MoveTo(wp.Position) end)
-
-            local wpTimeout = tick()
-            while (getHRP().Position - wp.Position).Magnitude > 3 do
-                if tick() - wpTimeout > 2 then break end
+            local wpStart = tick()
+            while tick() - wpStart < 5 do
+                if tick() - startTime > timeout then break end
                 if not hasCharacter() then break end
-                task.wait(0.05)
+                local h2 = getHRP()
+                if not h2 then break end
+                if (h2.Position - wp.Position).Magnitude < 3.5 then break end
+                task.wait(0.08)
             end
-            task.wait(0.05)
+            task.wait(0.03)
         end
-        if hasCharacter() then
-            success = (getHRP().Position - targetPart.Position).Magnitude < 8
+        if hasCharacter() and targetPart.Parent then
+            success = (getHRP().Position - targetPart.Position).Magnitude < 12
         end
     end
 
-    -- Fallback MoveTo langsung
     if not success then
         local fbStart = tick()
+        local lastProgressTime = tick()
+        local lastDist = (getHRP().Position - targetPart.Position).Magnitude
+        local stuckCount = 0
         while tick() - fbStart < timeout do
             if not hasCharacter() or not targetPart.Parent then break end
             local h = getHRP()
             if not h then break end
-            local dir = (targetPart.Position - h.Position) * Vector3.new(1, 0, 1)
+            local dir = targetPart.Position - h.Position
             local dist = dir.Magnitude
-            if dist < 3 then success = true; break end
-            dir = dir.Unit
-            local goal = h.Position + dir * math.min(dist, 8)
-            pcall(function() hum:MoveTo(goal) end)
+            if dist < 5 then success = true; break end
+
+            local now = tick()
+            if math.abs(lastDist - dist) < 0.8 then
+                if now - lastProgressTime > 2.5 then
+                    pcall(function() hum.Jump = true end)
+                    stuckCount += 1
+                    lastProgressTime = now
+                    if stuckCount >= 5 then
+                        local sideStep = Vector3.new(dir.Unit.Z, 0, -dir.Unit.X) * 10
+                        pcall(function() hum:MoveTo(h.Position + sideStep) end)
+                        task.wait(0.6)
+                        stuckCount = 0
+                    end
+                end
+            else
+                lastProgressTime = now
+                lastDist = dist
+            end
+            local flatDir = Vector3.new(dir.X, 0, dir.Z)
+            if flatDir.Magnitude > 0 then
+                pcall(function() hum:MoveTo(h.Position + flatDir.Unit * math.min(dist, 12)) end)
+            end
             task.wait(0.1)
         end
     end
 
-    if hasCharacter() then
-        pcall(function() hum:MoveTo(getHRP().Position) end)
-    end
+    if hasCharacter() then pcall(function() hum:MoveTo(getHRP().Position) end) end
     hum.WalkSpeed = oldSpeed
     return success
 end
 
-local function flyToTarget(targetPart, timeout)
-    timeout = timeout or 5
+-- ═══════════════════════════════════════════════════════════
+-- V2 METHODS
+-- ═══════════════════════════════════════════════════════════
+local function moveModeTarget(targetPart, timeout)
+    timeout = timeout or State.CollectV2Timeout
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
+    local hrp, hum = getHRP(), getHum()
+    if not hrp or not hum then return false end
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = State.CollectV2WalkSpeed
+    local startTime = tick()
+    local lastProgressTime = tick()
+    local lastDist = (hrp.Position - targetPart.Position).Magnitude
+    local success = false
+    while tick() - startTime < timeout do
+        if not hasCharacter() or not targetPart.Parent then break end
+        local h = getHRP()
+        if not h then break end
+        local diff = targetPart.Position - h.Position
+        local dist = diff.Magnitude
+        if dist < 5 then success = true; break end
+        local dir = Vector3.new(diff.X, 0, diff.Z)
+        if dir.Magnitude > 0 then
+            pcall(function() hum:Move(dir.Unit) end)
+        end
+        local now = tick()
+        if math.abs(lastDist - dist) < 0.8 then
+            if now - lastProgressTime > 2.5 then
+                pcall(function() hum.Jump = true end)
+                lastProgressTime = now
+            end
+        else
+            lastProgressTime = now
+            lastDist = dist
+        end
+        task.wait(0.05)
+    end
+    pcall(function() hum:Move(Vector3.zero) end)
+    hum.WalkSpeed = oldSpeed
+    return success
+end
+
+local function alignModeTarget(targetPart, timeout)
+    timeout = timeout or State.CollectV2Timeout
+    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
+    local hrp = getHRP()
+    if not hrp then return false end
+    local att = Instance.new("Attachment")
+    att.Parent = hrp
+    local align = Instance.new("AlignPosition")
+    align.Attachment0 = att
+    align.Mode = Enum.PositionAlignmentMode.OneAttachment
+    align.Position = targetPart.Position
+    align.MaxForce = 5e5
+    align.Responsiveness = 20
+    align.Parent = hrp
+    local vel = Instance.new("LinearVelocity")
+    vel.Attachment0 = att
+    vel.MaxForce = 5e5
+    vel.VectorVelocity = Vector3.zero
+    vel.RelativeTo = Enum.ActuatorRelativeTo.World
+    vel.Parent = hrp
+    local success = false
+    local startTime = tick()
+    while tick() - startTime < timeout do
+        if not hasCharacter() or not targetPart.Parent then break end
+        local h = getHRP()
+        if not h then break end
+        local diff = targetPart.Position - h.Position
+        if diff.Magnitude < 4 then success = true; break end
+        align.Position = targetPart.Position
+        if diff.Magnitude > 0 then
+            vel.VectorVelocity = diff.Unit * State.CollectV2WalkSpeed
+        end
+        task.wait(0.05)
+    end
+    pcall(function() align:Destroy() end)
+    pcall(function() vel:Destroy() end)
+    pcall(function() att:Destroy() end)
+    return success
+end
+
+local function walkPointModeTarget(targetPart, timeout)
+    timeout = timeout or State.CollectV2Timeout
+    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
+    local hrp, hum = getHRP(), getHum()
+    if not hrp or not hum then return false end
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = State.CollectV2WalkSpeed
     local startTime = tick()
     local success = false
     while tick() - startTime < timeout do
         if not hasCharacter() or not targetPart.Parent then break end
         local h = getHRP()
         if not h then break end
-        local dir = targetPart.Position - h.Position
-        local dist = dir.Magnitude
-        if dist < 4 then success = true; break end
-        dir = dir.Unit
-        pcall(function() h.CFrame = CFrame.new(h.Position + dir * math.min(dist, 8)) end)
-        task.wait(0.05)
+        if (targetPart.Position - h.Position).Magnitude < 4 then success = true; break end
+        pcall(function() hum.WalkToPoint = targetPart.Position end)
+        task.wait(0.08)
     end
+    hum.WalkSpeed = oldSpeed
     return success
 end
 
-local function tweenToTarget(targetPart, timeout)
-    timeout = timeout or 8
+local function walkPartModeTarget(targetPart, timeout)
+    timeout = timeout or State.CollectV2Timeout
     if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp = getHRP()
-    if not hrp then return false end
-    local targetCF = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
-    local tw = TS:Create(hrp, TweenInfo.new(State.TweenDuration, Enum.EasingStyle.Quad), {CFrame = targetCF})
-    tw:Play()
+    local hrp, hum = getHRP(), getHum()
+    if not hrp or not hum then return false end
+    local oldSpeed = hum.WalkSpeed
+    hum.WalkSpeed = State.CollectV2WalkSpeed
     local startTime = tick()
-    while tw.PlaybackState == Enum.PlaybackState.Playing and tick() - startTime < timeout do
-        if not hasCharacter() then break end
-        task.wait(0.05)
-    end
-    return true
-end
-
-local function lerpToTarget(targetPart, timeout)
-    timeout = timeout or 8
-    if not hasCharacter() or not targetPart or not targetPart.Parent then return false end
-    local hrp = getHRP()
-    if not hrp then return false end
-    local startCF = hrp.CFrame
-    local targetCF = CFrame.new(targetPart.Position + Vector3.new(0, 3, 0))
-    local startTime = tick()
-    for i = 0, 1, (1 / State.LerpSteps) do
-        if tick() - startTime > timeout then break end
-        if not hasCharacter() then break end
+    local success = false
+    pcall(function() hum.WalkToPart = targetPart end)
+    while tick() - startTime < timeout do
+        if not hasCharacter() or not targetPart.Parent then break end
         local h = getHRP()
         if not h then break end
-        h.CFrame = startCF:Lerp(targetCF, i)
-        task.wait(State.LerpStepDelay)
+        if (targetPart.Position - h.Position).Magnitude < 4 then success = true; break end
+        task.wait(0.1)
     end
-    return true
+    pcall(function() hum.WalkToPart = nil end)
+    hum.WalkSpeed = oldSpeed
+    return success
 end
 
--- GOD MODE / WALKSPEED
+local function pathModeTarget(targetPart, timeout)
+    return walkToTarget(targetPart, timeout or State.CollectV2Timeout)
+end
+
+-- MODE DISPATCHER
+local function moveV1(part, dist)
+    if State.WalkNaturalEnabled then
+        return walkToTarget(part, 120)
+    end
+    if dist <= 5 then return true end
+    return walkToTarget(part, 120)
+end
+
+local function moveV2(part)
+    if State.WalkNaturalEnabled then
+        return walkToTarget(part, 120)
+    end
+    local mode = State.CollectV2Mode
+    if mode == "move" then return moveModeTarget(part, State.CollectV2Timeout) end
+    if mode == "align" then return alignModeTarget(part, State.CollectV2Timeout) end
+    if mode == "walkpoint" then return walkPointModeTarget(part, State.CollectV2Timeout) end
+    if mode == "walkpart" then return walkPartModeTarget(part, State.CollectV2Timeout) end
+    return pathModeTarget(part, State.CollectV2Timeout)
+end
+
+-- GOD MODE
 task.spawn(function()
     while true do
         task.wait(0.3)
@@ -721,7 +846,6 @@ task.spawn(function()
     end
 end)
 
--- PROMPT HANDLER
 local function forceNoDelayPrompt(obj)
     if obj:IsA("ProximityPrompt") and State.NoDelay then
         pcall(function()
@@ -731,13 +855,11 @@ local function forceNoDelayPrompt(obj)
         end)
     end
 end
-
 pcall(function()
     for _, obj in ipairs(workspace:GetDescendants()) do
         forceNoDelayPrompt(obj)
     end
 end)
-
 workspace.DescendantAdded:Connect(function(obj)
     if obj:IsA("ProximityPrompt") and State.NoDelay then
         task.wait(0.05)
@@ -745,12 +867,10 @@ workspace.DescendantAdded:Connect(function(obj)
     end
 end)
 
--- COLLECT ITEM
 local function collectItem(data)
     if not data or not data.part or not data.part.Parent then return false end
     local part, model = data.part, data.model
     local success = false
-
     local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
     if not prompt then prompt = part:FindFirstChildWhichIsA("ProximityPrompt") end
     if prompt then
@@ -763,13 +883,11 @@ local function collectItem(data)
             pcall(function() fireproximityprompt(prompt, 0) success = true end)
         end
     end
-
     local cd = model:FindFirstChildWhichIsA("ClickDetector", true)
     if not cd and part then cd = part:FindFirstChildWhichIsA("ClickDetector") end
     if cd and fireclickdetector then
         pcall(function() fireclickdetector(cd) success = true end)
     end
-
     local hrp = getHRP()
     if hrp and firetouchinterest then
         pcall(function()
@@ -846,26 +964,11 @@ local function removeESP(model)
     end
 end
 
--- MODE DISPATCHER
-local function moveToTarget(part, dist)
-    local mode = State.CollectMode
-    if mode == "fly" then
-        return flyToTarget(part, 5)
-    elseif mode == "tween" then
-        return tweenToTarget(part, 8)
-    elseif mode == "lerp" then
-        return lerpToTarget(part, 8)
-    else -- walk
-        if dist <= 5 then return true end
-        return walkToTarget(part, 8)
-    end
-end
-
--- AUTO COLLECT LOOPS
+-- AUTO COLLECT V1
 task.spawn(function()
     while true do
         task.wait(State.CollectInterval)
-        if State.AutoCollect and hasCharacter() then
+        if State.CollectV1Enabled and hasCharacter() then
             AntiDetect.Running = true
             local items = scanItems()
             if #items > 0 then
@@ -877,17 +980,16 @@ task.spawn(function()
                 local collected = 0
                 for _, d in ipairs(items) do
                     if not hasCharacter() then break end
-                    if d.dist <= State.MaxDistance and collected < State.MaxPerCycle then
-                        moveToTarget(d.part, d.dist)
-                        if collectItem(d) then
-                            if not countedItems[d.model] then
-                                countedItems[d.model] = true
-                                StatsData.ItemsCollected += 1
-                                if NotifyUser then NotifyUser("Collected", "TrickOrTreatItem!", "success") end
-                            end
-                            collected += 1
-                            task.wait(0.2)
+                    if collected >= 10 then break end
+                    moveV1(d.part, d.dist)
+                    if collectItem(d) then
+                        if not countedItems[d.model] then
+                            countedItems[d.model] = true
+                            StatsData.ItemsCollected += 1
+                            NotifyUser("V1", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
                         end
+                        collected += 1
+                        task.wait(0.2)
                     end
                 end
             end
@@ -896,10 +998,45 @@ task.spawn(function()
     end
 end)
 
+-- AUTO COLLECT V2
+task.spawn(function()
+    while true do
+        task.wait(State.CollectV2Interval)
+        if State.CollectV2Enabled and hasCharacter() then
+            AntiDetect.Running = true
+            local items = scanItems()
+            if #items > 0 then
+                local hrp = getHRP()
+                for _, d in ipairs(items) do
+                    d.dist = (d.part.Position - hrp.Position).Magnitude
+                end
+                table.sort(items, function(a, b) return a.dist < b.dist end)
+                local collected = 0
+                for _, d in ipairs(items) do
+                    if not hasCharacter() then break end
+                    if collected >= 10 then break end
+                    moveV2(d.part)
+                    if collectItem(d) then
+                        if not countedItems[d.model] then
+                            countedItems[d.model] = true
+                            StatsData.ItemsCollected += 1
+                            NotifyUser("V2", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
+                        end
+                        collected += 1
+                        task.wait(0.2)
+                    end
+                end
+            end
+            AntiDetect.Running = false
+        end
+    end
+end)
+
+-- PUMPKIN
 task.spawn(function()
     while true do
         task.wait(State.PumpkinInterval)
-        if State.AutoCollectPumpkin and hasCharacter() then
+        if State.PumpkinEnabled and hasCharacter() then
             AntiDetect.Running = true
             local pumpkins = scanPumpkins()
             if #pumpkins > 0 then
@@ -911,17 +1048,20 @@ task.spawn(function()
                 local collected = 0
                 for _, d in ipairs(pumpkins) do
                     if not hasCharacter() then break end
-                    if d.dist <= State.PumpkinMaxDistance and collected < State.PumpkinMaxPerCycle then
-                        moveToTarget(d.part, d.dist)
-                        if collectItem(d) then
-                            if not countedPumpkins[d.model] then
-                                countedPumpkins[d.model] = true
-                                StatsData.PumpkinsCollected += 1
-                                if NotifyUser then NotifyUser("Pumpkin", "Pumpkin collected!", "success") end
-                            end
-                            collected += 1
-                            task.wait(0.2)
+                    if collected >= 10 then break end
+                    if State.WalkNaturalEnabled or State.CollectV2Enabled then
+                        moveV2(d.part)
+                    else
+                        moveV1(d.part, d.dist)
+                    end
+                    if collectItem(d) then
+                        if not countedPumpkins[d.model] then
+                            countedPumpkins[d.model] = true
+                            StatsData.PumpkinsCollected += 1
+                            NotifyUser("Pumpkin", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
                         end
+                        collected += 1
+                        task.wait(0.2)
                     end
                 end
             end
@@ -933,7 +1073,7 @@ end)
 -- SPAWN COUNTER
 task.spawn(function()
     while true do
-        task.wait(1.5)
+        task.wait(3)
         local items = scanItems()
         StatsData.ItemsFound = #items
         for _, d in ipairs(items) do
@@ -950,7 +1090,6 @@ task.spawn(function()
         for m in pairs(countedItems) do
             if not m.Parent then countedItems[m] = nil end
         end
-
         local pk = scanPumpkins()
         StatsData.PumpkinsFound = #pk
         for _, d in ipairs(pk) do
@@ -973,7 +1112,7 @@ end)
 -- ESP LOOP
 task.spawn(function()
     while true do
-        task.wait(1)
+        task.wait(1.5)
         if State.ItemESP then
             local items = scanItems()
             local cur = {}
@@ -992,7 +1131,6 @@ task.spawn(function()
             for m in pairs(itemCache) do removeESP(m) end
             itemCache = {}
         end
-
         if State.PumpkinESP then
             local pk = scanPumpkins()
             local cur = {}
@@ -1011,7 +1149,6 @@ task.spawn(function()
             for m in pairs(pumpkinCache) do removeESP(m) end
             pumpkinCache = {}
         end
-
         if State.ReaperESP then
             local rs = scanReapers()
             StatsData.ReapersFound = #rs
@@ -1031,7 +1168,6 @@ task.spawn(function()
             for m in pairs(reaperCache) do removeESP(m) end
             reaperCache = {}
         end
-
         if State.GhostESP then
             local gs = scanGhosts()
             StatsData.GhostsFound = #gs
@@ -1054,10 +1190,9 @@ task.spawn(function()
     end
 end)
 
--- Distance updater
 task.spawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.7)
         if State.ShowDistance and hasCharacter() then
             local hrp = getHRP()
             local function update(cache, tagName, baseColor)
@@ -1086,7 +1221,6 @@ task.spawn(function()
     end
 end)
 
--- EVENT TIMER
 local function getEventInfo()
     local t = os.date("*t")
     local hour, min, sec = t.hour, t.min, t.sec
@@ -1460,8 +1594,8 @@ THt.TextXAlignment = Enum.TextXAlignment.Left
 THt.ZIndex = 12
 
 local tabData = {
-    {name="RUMAH"}, {name="COLLECT"}, {name="ESP"}, {name="TELEPORT"},
-    {name="EVENT"}, {name="MISC"}, {name="TEMA"}, {name="CREDITS"},
+    {name="RUMAH"}, {name="COLLECT"}, {name="ESP"}, {name="EVENT"},
+    {name="MISC"}, {name="TEMA"}, {name="CREDITS"},
 }
 
 local tabContent = {}
@@ -1581,7 +1715,6 @@ local function Toggle(parent, title, initial, cb)
     f.ZIndex = 10
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
     trackSearch(f, title)
-
     local lbl = Instance.new("TextLabel", f)
     lbl.Size = UDim2.new(1,-60,1,0)
     lbl.Position = UDim2.new(0,10,0,0)
@@ -1589,21 +1722,18 @@ local function Toggle(parent, title, initial, cb)
     lbl.Text = title; lbl.TextColor3 = C.Txt
     lbl.TextSize = 11; lbl.Font = Enum.Font.GothamMedium
     lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.ZIndex = 11
-
     local bg = Instance.new("Frame", f)
     bg.Size = UDim2.new(0,40,0,22)
     bg.Position = UDim2.new(1,-50,0.5,-11)
     bg.BackgroundColor3 = initial and C.Grn or Color3.fromRGB(60,60,68)
     bg.BorderSizePixel = 0; bg.ZIndex = 11
     Instance.new("UICorner", bg).CornerRadius = UDim.new(1,0)
-
     local knob = Instance.new("Frame", bg)
     knob.Size = UDim2.new(0,18,0,18)
     knob.Position = initial and UDim2.new(1,-20,0.5,-9) or UDim2.new(0,2,0.5,-9)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     knob.BorderSizePixel = 0; knob.ZIndex = 12
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
-
     local state = initial
     local btn = Instance.new("TextButton", f)
     btn.Size = UDim2.new(1,0,1,0); btn.BackgroundTransparency = 1
@@ -1628,7 +1758,6 @@ local function Slider(parent, title, mn, mx, df, cb)
     f.ZIndex = 10
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
     trackSearch(f, title)
-
     local l = Instance.new("TextLabel", f)
     l.Size = UDim2.new(1,-14,0,14)
     l.Position = UDim2.new(0,10,0,6)
@@ -1636,28 +1765,24 @@ local function Slider(parent, title, mn, mx, df, cb)
     l.Text = title .. ": " .. df
     l.TextColor3 = C.Txt; l.TextSize = 11
     l.Font = Enum.Font.GothamMedium; l.TextXAlignment = Enum.TextXAlignment.Left; l.ZIndex = 11
-
     local bar = Instance.new("Frame", f)
     bar.Size = UDim2.new(1,-20,0,8)
     bar.Position = UDim2.new(0,10,0,26)
     bar.BackgroundColor3 = Color3.fromRGB(60,60,68)
     bar.BorderSizePixel = 0; bar.ZIndex = 11
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
-
     local fl = Instance.new("Frame", bar)
     fl.Size = UDim2.new((df-mn)/(mx-mn),0,1,0)
     fl.BackgroundColor3 = C.Pri
     fl.BorderSizePixel = 0; fl.ZIndex = 12
     Instance.new("UICorner", fl).CornerRadius = UDim.new(1,0)
     track(fl, "BackgroundColor3")
-
     local knob = Instance.new("Frame", fl)
     knob.Size = UDim2.new(0,14,0,14)
     knob.Position = UDim2.new(1,-7,0.5,-7)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     knob.BorderSizePixel = 0; knob.ZIndex = 13
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
-
     local dr = false
     bar.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dr = true end
@@ -1687,7 +1812,6 @@ local function Dropdown(parent, title, options, default, cb)
     f.ZIndex = 10
     Instance.new("UICorner", f).CornerRadius = UDim.new(0,10)
     trackSearch(f, title)
-
     local lbl = Instance.new("TextLabel", f)
     lbl.Size = UDim2.new(0.5,0,1,0)
     lbl.Position = UDim2.new(0,10,0,0)
@@ -1698,7 +1822,6 @@ local function Dropdown(parent, title, options, default, cb)
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.ZIndex = 11
-
     local btn = Instance.new("TextButton", f)
     btn.Size = UDim2.new(0.45,0,0,22)
     btn.Position = UDim2.new(0.53,0,0.5,-11)
@@ -1711,7 +1834,6 @@ local function Dropdown(parent, title, options, default, cb)
     btn.AutoButtonColor = false
     btn.ZIndex = 11
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
-
     local idx = 1
     for i, v in ipairs(options) do if v == default then idx = i end end
     btn.MouseButton1Click:Connect(function()
@@ -1732,7 +1854,6 @@ welcomeCard.BackgroundTransparency = 0.25
 welcomeCard.BorderSizePixel = 0
 welcomeCard.ZIndex = 10
 Instance.new("UICorner", welcomeCard).CornerRadius = UDim.new(0,12)
-
 local bigAv = Instance.new("Frame", welcomeCard)
 bigAv.Size = UDim2.new(0,52,0,52)
 bigAv.Position = UDim2.new(0,10,0.5,-26)
@@ -1753,7 +1874,6 @@ task.spawn(function()
     end)
     if ok and t then bigAvI.Image = t end
 end)
-
 local greetLbl = Instance.new("TextLabel", welcomeCard)
 greetLbl.Size = UDim2.new(1,-74,0,18)
 greetLbl.Position = UDim2.new(0,72,0,12)
@@ -1762,7 +1882,6 @@ greetLbl.Text = "Halo, " .. (LP.DisplayName or LP.Name) .. "!"
 greetLbl.TextColor3 = C.Txt; greetLbl.TextSize = 13
 greetLbl.Font = Enum.Font.GothamMedium
 greetLbl.TextXAlignment = Enum.TextXAlignment.Left; greetLbl.ZIndex = 12
-
 local clockLbl = Instance.new("TextLabel", welcomeCard)
 clockLbl.Size = UDim2.new(1,-74,0,14)
 clockLbl.Position = UDim2.new(0,72,0,32)
@@ -1770,7 +1889,6 @@ clockLbl.BackgroundTransparency = 1
 clockLbl.Text = "--"; clockLbl.TextColor3 = C.Dim
 clockLbl.TextSize = 10; clockLbl.Font = Enum.Font.Gotham
 clockLbl.TextXAlignment = Enum.TextXAlignment.Left; clockLbl.ZIndex = 12
-
 local uptimeLbl = Instance.new("TextLabel", welcomeCard)
 uptimeLbl.Size = UDim2.new(1,-74,0,14)
 uptimeLbl.Position = UDim2.new(0,72,0,48)
@@ -1788,7 +1906,6 @@ statsCard.BackgroundTransparency = 0.25
 statsCard.BorderSizePixel = 0
 statsCard.ZIndex = 10
 Instance.new("UICorner", statsCard).CornerRadius = UDim.new(0,12)
-
 local function mkStatBox(parent, x, title)
     local box = Instance.new("Frame", parent)
     box.Size = UDim2.new(0,100,0,48)
@@ -1813,7 +1930,6 @@ local function mkStatBox(parent, x, title)
     track(vL, "TextColor3")
     return vL
 end
-
 local fpsVal = mkStatBox(statsCard, 8, "FPS")
 local pingVal = mkStatBox(statsCard, 116, "PING")
 local playerVal = mkStatBox(statsCard, 224, "PLAYERS")
@@ -1848,44 +1964,55 @@ end)
 
 -- FILL COLLECT
 local tcol = tabContent.COLLECT
-Sect(tcol, "MODE COLLECT")
-Dropdown(tcol, "Mode", {"walk", "fly", "tween", "lerp"}, State.CollectMode, function(v)
-    State.CollectMode = v
-    NotifyUser("Mode", "Set: " .. v, "success")
+
+Sect(tcol, "═══ WALK NATURAL (SMOOTH VERTICAL) ═══")
+Toggle(tcol, "Enable Walk Natural", false, function(v)
+    State.WalkNaturalEnabled = v
+    if v then NotifyUser("Walk Natural", "Noclip + Smooth Vertical aktif", "success") end
 end)
+Slider(tcol, "Vertical Speed (stud/s)", 5, 100, 30, function(v) State.WalkVerticalSpeed = v end)
+Slider(tcol, "Smoothness (ms)", 10, 300, 50, function(v) State.WalkVerticalSmoothness = v / 1000 end)
+Slider(tcol, "Detect Range (stud)", 5, 60, 25, function(v) State.WalkHorizontalRange = v end)
 
-Sect(tcol, "TREAT COLLECT")
-Toggle(tcol, "Auto Collect Item", true, function(v) State.AutoCollect = v end)
-Slider(tcol, "Max Distance", 50, 2000, 500, function(v) State.MaxDistance = v end)
-Slider(tcol, "Interval", 1, 10, 1.5, function(v) State.CollectInterval = v end)
+Sect(tcol, "═══ COLLECT V1 ═══")
+Toggle(tcol, "Enable Collect V1", false, function(v) State.CollectV1Enabled = v end)
+Dropdown(tcol, "V1 Mode", {"walk"}, State.CollectMode, function(v)
+    State.CollectMode = v
+    NotifyUser("V1 Mode", v, "success")
+end)
+Slider(tcol, "V1 Interval", 1, 10, 2, function(v) State.CollectInterval = v end)
+Slider(tcol, "V1 Walk Speed", 16, 80, 32, function(v) State.WalkSpeed = v end)
 
-Sect(tcol, "PUMPKIN COLLECT")
-Toggle(tcol, "Auto Collect Pumpkin", true, function(v) State.AutoCollectPumpkin = v end)
-Slider(tcol, "Pumpkin Max Distance", 50, 2000, 500, function(v) State.PumpkinMaxDistance = v end)
-Slider(tcol, "Pumpkin Interval", 1, 10, 1.5, function(v) State.PumpkinInterval = v end)
+Sect(tcol, "═══ COLLECT V2 ═══")
+Toggle(tcol, "Enable Collect V2", false, function(v) State.CollectV2Enabled = v end)
+Dropdown(tcol, "V2 Mode", {"path", "move", "align", "walkpoint", "walkpart"}, State.CollectV2Mode, function(v)
+    State.CollectV2Mode = v
+    NotifyUser("V2 Mode", v, "success")
+end)
+Slider(tcol, "V2 Interval", 1, 10, 2, function(v) State.CollectV2Interval = v end)
+Slider(tcol, "V2 Walk Speed", 16, 80, 32, function(v) State.CollectV2WalkSpeed = v end)
+Slider(tcol, "V2 Timeout (s)", 30, 300, 120, function(v) State.CollectV2Timeout = v end)
 
-Sect(tcol, "TUNING")
-Slider(tcol, "Walk Speed", 16, 60, 32, function(v) State.WalkSpeed = v end)
-Slider(tcol, "Tween Duration (x10)", 5, 40, 10, function(v) State.TweenDuration = v / 10 end)
-Slider(tcol, "Lerp Steps", 5, 40, 20, function(v) State.LerpSteps = v end)
-Slider(tcol, "Lerp Step Delay (ms)", 10, 100, 20, function(v) State.LerpStepDelay = v / 1000 end)
+Sect(tcol, "═══ PUMPKIN ═══")
+Toggle(tcol, "Auto Collect Pumpkin", false, function(v) State.PumpkinEnabled = v end)
+Slider(tcol, "Pumpkin Interval", 1, 10, 2, function(v) State.PumpkinInterval = v end)
 
 Sect(tcol, "METHOD")
-Toggle(tcol, "FirePrompt", true, function(v) State.FirePrompt = v end)
-Toggle(tcol, "No Delay Button", true, function(v) State.NoDelay = v end)
+Toggle(tcol, "FirePrompt", false, function(v) State.FirePrompt = v end)
+Toggle(tcol, "No Delay Button", false, function(v) State.NoDelay = v end)
 
 -- FILL ESP
 local te = tabContent.ESP
 Sect(te, "ESP")
-Toggle(te, "Item ESP", true, function(v)
+Toggle(te, "Item ESP", false, function(v)
     State.ItemESP = v
     if not v then for m in pairs(itemCache) do removeESP(m) end itemCache = {} end
 end)
-Toggle(te, "Pumpkin ESP", true, function(v)
+Toggle(te, "Pumpkin ESP", false, function(v)
     State.PumpkinESP = v
     if not v then for m in pairs(pumpkinCache) do removeESP(m) end pumpkinCache = {} end
 end)
-Toggle(te, "Reaper ESP", true, function(v)
+Toggle(te, "Reaper ESP", false, function(v)
     State.ReaperESP = v
     if not v then for m in pairs(reaperCache) do removeESP(m) end reaperCache = {} end
 end)
@@ -1893,34 +2020,7 @@ Toggle(te, "Ghost ESP", false, function(v)
     State.GhostESP = v
     if not v then for m in pairs(ghostCache) do removeESP(m) end ghostCache = {} end
 end)
-Toggle(te, "Show Distance", true, function(v) State.ShowDistance = v end)
-
--- FILL TELEPORT
-local tp = tabContent.TELEPORT
-local currentCat = ""
-for i, loc in ipairs(TP_LOCATIONS) do
-    if loc.category ~= currentCat then
-        currentCat = loc.category
-        Sect(tp, "-- " .. loc.category .. " --")
-    end
-    local b = Instance.new("TextButton", tp)
-    b.Size = UDim2.new(1,-4,0,28)
-    b.BackgroundColor3 = C.Card
-    b.BackgroundTransparency = 0.2
-    b.BorderSizePixel = 0
-    b.Text = loc.name
-    b.TextColor3 = C.Txt
-    b.TextSize = 10
-    b.Font = Enum.Font.GothamMedium
-    b.AutoButtonColor = false
-    b.ZIndex = 11
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
-    trackSearch(b, loc.name)
-    b.MouseButton1Click:Connect(function()
-        sfx()
-        if safeTP(loc.pos + Vector3.new(0, 3, 0)) then Log("TP: " .. loc.name, "success") end
-    end)
-end
+Toggle(te, "Show Distance", false, function(v) State.ShowDistance = v end)
 
 -- FILL EVENT
 local tEv = tabContent.EVENT
@@ -1932,7 +2032,6 @@ eventCard.BackgroundTransparency = 0.2
 eventCard.BorderSizePixel = 0
 eventCard.ZIndex = 10
 Instance.new("UICorner", eventCard).CornerRadius = UDim.new(0,10)
-
 local eventTimerLbl = Instance.new("TextLabel", eventCard)
 eventTimerLbl.Size = UDim2.new(1,-10,0,32)
 eventTimerLbl.Position = UDim2.new(0,5,0,8)
@@ -1944,7 +2043,6 @@ eventTimerLbl.Font = Enum.Font.GothamBold
 eventTimerLbl.TextXAlignment = Enum.TextXAlignment.Center
 eventTimerLbl.ZIndex = 11
 track(eventTimerLbl, "TextColor3")
-
 local eventProgressBg = Instance.new("Frame", eventCard)
 eventProgressBg.Size = UDim2.new(1,-16,0,6)
 eventProgressBg.Position = UDim2.new(0,8,0,48)
@@ -1952,7 +2050,6 @@ eventProgressBg.BackgroundColor3 = Color3.fromRGB(60,60,68)
 eventProgressBg.BorderSizePixel = 0
 eventProgressBg.ZIndex = 11
 Instance.new("UICorner", eventProgressBg).CornerRadius = UDim.new(1,0)
-
 local eventProgressFill = Instance.new("Frame", eventProgressBg)
 eventProgressFill.Size = UDim2.new(0, 0, 1, 0)
 eventProgressFill.BackgroundColor3 = C.Pri
@@ -1960,7 +2057,6 @@ eventProgressFill.BorderSizePixel = 0
 eventProgressFill.ZIndex = 12
 Instance.new("UICorner", eventProgressFill).CornerRadius = UDim.new(1,0)
 track(eventProgressFill, "BackgroundColor3")
-
 local eventStatusLbl = Instance.new("TextLabel", eventCard)
 eventStatusLbl.Size = UDim2.new(1,-10,0,14)
 eventStatusLbl.Position = UDim2.new(0,5,0,60)
@@ -1980,7 +2076,6 @@ clockCard.BackgroundTransparency = 0.2
 clockCard.BorderSizePixel = 0
 clockCard.ZIndex = 10
 Instance.new("UICorner", clockCard).CornerRadius = UDim.new(0,10)
-
 local clockLbl2 = Instance.new("TextLabel", clockCard)
 clockLbl2.Size = UDim2.new(1,-10,0,30)
 clockLbl2.Position = UDim2.new(0,5,0,6)
@@ -1991,7 +2086,6 @@ clockLbl2.TextSize = 22
 clockLbl2.Font = Enum.Font.GothamBold
 clockLbl2.TextXAlignment = Enum.TextXAlignment.Center
 clockLbl2.ZIndex = 11
-
 local dateLbl2 = Instance.new("TextLabel", clockCard)
 dateLbl2.Size = UDim2.new(1,-10,0,16)
 dateLbl2.Position = UDim2.new(0,5,0,38)
@@ -2028,12 +2122,11 @@ local function mkStatRow(parent, title, color)
     v.TextXAlignment = Enum.TextXAlignment.Right; v.ZIndex = 11
     return v
 end
-
 local statCollectedVal = mkStatRow(tEv, "Item Collected", C.Grn)
 local statSpawnVal = mkStatRow(tEv, "Item Spawn", C.Pri)
 local statPumpkinColVal = mkStatRow(tEv, "Pumpkin Collected", C.Orng)
 local statPumpkinSpawnVal = mkStatRow(tEv, "Pumpkin Spawn", C.Yel)
-local statAntiDetect = mkStatRow(tEv, "Anti-Detect Block", C.Cyn)
+local statVertVal = mkStatRow(tEv, "Vertical Steps", C.Cyn)
 local statMoveBlock = mkStatRow(tEv, "Movement Block", C.Red)
 
 task.spawn(function()
@@ -2061,7 +2154,7 @@ task.spawn(function()
             statSpawnVal.Text = tostring(StatsData.ItemsSpawned)
             statPumpkinColVal.Text = tostring(StatsData.PumpkinsCollected)
             statPumpkinSpawnVal.Text = tostring(StatsData.PumpkinsSpawned)
-            statAntiDetect.Text = tostring(AntiDetect.KicksBlocked + AntiDetect.RemotesBlocked + AntiDetect.ScriptsDisabled)
+            statVertVal.Text = tostring(StatsData.VerticalSteps)
             statMoveBlock.Text = tostring(AntiDetect.MovementBlocked)
         end)
     end
@@ -2070,12 +2163,12 @@ end)
 -- FILL MISC
 local tm = tabContent.MISC
 Sect(tm, "ANTI-DETECT SYSTEM")
-Toggle(tm, "Enable Anti-Detect", true, function(v)
+Toggle(tm, "Enable Anti-Detect", false, function(v)
     AntiDetect.Enabled = v
     NotifyUser("Anti-Detect", v and "ON" or "OFF", v and "success" or "warn")
 end)
-Slider(tm, "Max TP Distance", 10, 200, 40, function(v) AntiDetect.MaxTPDistance = v end)
-Slider(tm, "Max Speed (stud/s)", 20, 200, 60, function(v) AntiDetect.MaxSpeed = v end)
+Slider(tm, "Max TP Distance", 10, 200, 80, function(v) AntiDetect.MaxTPDistance = v end)
+Slider(tm, "Max Speed (stud/s)", 20, 200, 100, function(v) AntiDetect.MaxSpeed = v end)
 
 Sect(tm, "WALKSPEED")
 Toggle(tm, "Enable WalkSpeed", false, function(v)
@@ -2093,7 +2186,7 @@ Slider(tm, "Speed", 16, 200, 16, function(v)
     end
 end)
 
-Sect(tm, "NOCLIP")
+Sect(tm, "NOCLIP (Manual)")
 Toggle(tm, "Noclip", false, function(v) State.Noclip = v end)
 
 Sect(tm, "INVISIBLE")
@@ -2114,18 +2207,16 @@ Toggle(tm, "GodMode Desync", false, function(v) State.GodMode = v end)
 Slider(tm, "Detect Radius", 10, 200, 30, function(v) State.DesyncRadius = v end)
 
 Sect(tm, "ANTI-AFK")
-Toggle(tm, "Anti-AFK", true, function(v) State.AntiAFK = v end)
+Toggle(tm, "Anti-AFK", false, function(v) State.AntiAFK = v end)
 Slider(tm, "AFK Interval", 15, 120, 90, function(v) State.AntiAFKInterval = v end)
 
 Sect(tm, "UTILITY")
 Btn(tm, "Rejoin Server", function()
     game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
 end, Color3.fromRGB(60, 120, 90))
-
 Btn(tm, "Copy Discord Invite", function()
     if setclipboard then setclipboard(CONFIG.DISCORD) Log("Discord copied", "success") end
 end)
-
 Btn(tm, "Unload UI", function()
     task.wait(0.3)
     stopFly()
@@ -2209,7 +2300,6 @@ hueFrame.BackgroundTransparency = 0.25
 hueFrame.BorderSizePixel = 0
 hueFrame.ZIndex = 10
 Instance.new("UICorner", hueFrame).CornerRadius = UDim.new(0,10)
-
 local huePrev = Instance.new("Frame", hueFrame)
 huePrev.Size = UDim2.new(0,18,0,18)
 huePrev.Position = UDim2.new(1,-30,0,4)
@@ -2217,7 +2307,6 @@ huePrev.BackgroundColor3 = Color3.fromHSV(0.08, 0.65, 0.95)
 huePrev.BorderSizePixel = 0
 huePrev.ZIndex = 12
 Instance.new("UICorner", huePrev).CornerRadius = UDim.new(1,0)
-
 local hueBar = Instance.new("Frame", hueFrame)
 hueBar.Size = UDim2.new(1,-20,0,22)
 hueBar.Position = UDim2.new(0,10,0,28)
@@ -2225,7 +2314,6 @@ hueBar.BackgroundColor3 = Color3.fromRGB(255,255,255)
 hueBar.BorderSizePixel = 0
 hueBar.ZIndex = 11
 Instance.new("UICorner", hueBar).CornerRadius = UDim.new(1,0)
-
 local hueGrad = Instance.new("UIGradient", hueBar)
 hueGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0.00, Color3.fromRGB(255, 90, 90)),
@@ -2237,7 +2325,6 @@ hueGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0.85, Color3.fromRGB(210, 130, 250)),
     ColorSequenceKeypoint.new(1.00, Color3.fromRGB(255, 90, 90)),
 })
-
 local hueKnob = Instance.new("Frame", hueBar)
 hueKnob.Size = UDim2.new(0,24,0,24)
 hueKnob.Position = UDim2.new(0.08, -12, 0.5, -12)
@@ -2294,14 +2381,12 @@ Instance.new("UICorner", creditCard).CornerRadius = UDim.new(0,12)
 local ccS = Instance.new("UIStroke", creditCard)
 ccS.Color = C.Pri; ccS.Thickness = 1; ccS.Transparency = 0.7; ccS.Parent = creditCard
 track(ccS, "Color")
-
 local creditLogo = Instance.new("ImageLabel", creditCard)
 creditLogo.Size = UDim2.new(0, 56, 0, 56)
 creditLogo.Position = UDim2.new(0.5, -28, 0, 10)
 creditLogo.BackgroundTransparency = 1
 creditLogo.Image = CONFIG.LOGO
 creditLogo.ZIndex = 12
-
 local creditTitle = Instance.new("TextLabel", creditCard)
 creditTitle.Size = UDim2.new(1, -20, 0, 22)
 creditTitle.Position = UDim2.new(0, 10, 0, 70)
@@ -2312,7 +2397,6 @@ creditTitle.TextSize = 18
 creditTitle.Font = Enum.Font.GothamBlack
 creditTitle.TextXAlignment = Enum.TextXAlignment.Center
 creditTitle.ZIndex = 12
-
 local creditSub = Instance.new("TextLabel", creditCard)
 creditSub.Size = UDim2.new(1, -20, 0, 16)
 creditSub.Position = UDim2.new(0, 10, 0, 94)
@@ -2323,7 +2407,6 @@ creditSub.TextSize = 10
 creditSub.Font = Enum.Font.GothamMedium
 creditSub.TextXAlignment = Enum.TextXAlignment.Center
 creditSub.ZIndex = 12
-
 local creditMade = Instance.new("TextLabel", creditCard)
 creditMade.Size = UDim2.new(1, -20, 0, 14)
 creditMade.Position = UDim2.new(0, 10, 0, 112)
@@ -2387,6 +2470,6 @@ UIS.InputBegan:Connect(function(i, g)
     end
 end)
 
-Log("Ultimate Final loaded", "success")
-NotifyUser("Oc1DvHUB", "Ultimate Final loaded!", "success")
-print("[Oc1DvHUB] Ultimate Final loaded ✅")
+Log("FINAL V4 loaded", "success")
+NotifyUser("Oc1DvHUB", "FINAL V4 loaded!", "success")
+print("[Oc1DvHUB] FINAL V4 loaded ✅")
