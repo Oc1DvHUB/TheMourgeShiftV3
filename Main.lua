@@ -1,8 +1,8 @@
---[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — FINAL V9
-     Fixed Statistics (Candy vs Pumpkin separated), Optimized, UI Bigger + Effects
-     Reliable Claim, Server Info, Clean Traffic Buttons
+--[[ Oc1DvHUB × MOURGE SHIFT HALLOWEEN EDITION — V9.1
+     + Speedhack Anti-Detect (WalkSpeed property spoof + remote block)
+     + Fixed UI not showing issue
 ]]
-print("[Oc1DvHUB] Loading FINAL V9...")
+print("[Oc1DvHUB] Loading V9.1...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -69,7 +69,18 @@ local function trackSearch(frame, text)
     table.insert(searchables, frame)
 end
 
-local pg = LP:WaitForChild("PlayerGui", 10) or game:GetService("CoreGui")
+-- ═══ FIX UI: Pastikan pg valid ═══
+local pg
+local ok_pg, result_pg = pcall(function()
+    return LP:WaitForChild("PlayerGui", 15)
+end)
+if ok_pg and result_pg then
+    pg = result_pg
+else
+    pg = LP:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+end
+print("[Oc1DvHUB] PlayerGui obtained:", pg)
+
 local old = pg:FindFirstChild("Oc1DvHUB_UI")
 if old then old:Destroy() end
 
@@ -88,57 +99,38 @@ end
 
 local NotifyUser, Log
 
--- ═══════════════════════════════════════════════════════════
--- STATE
--- ═══════════════════════════════════════════════════════════
 local State = {
-    AutoCollectCandy = false,
-    CandyMethod = "walk",
-    CandyInterval = 2,
-    CandyWalkSpeed = 32,
-    CandyTimeout = 120,
-
-    AutoCollectPumpkin = false,
-    PumpkinMethod = "walk",
-    PumpkinInterval = 2,
-
-    WalkNaturalEnabled = false,
-    WalkVertMode = "tween",
-    WalkVerticalSpeed = 30,
-    WalkVerticalSmoothness = 0.05,
-    WalkTweenDuration = 0.5,
-    WalkTweenDelay = 0.1,
-    WalkHorizontalRange = 25,
-
+    AutoCollectCandy = false, CandyMethod = "walk", CandyInterval = 2,
+    CandyWalkSpeed = 32, CandyTimeout = 120,
+    AutoCollectPumpkin = false, PumpkinMethod = "walk", PumpkinInterval = 2,
+    WalkNaturalEnabled = false, WalkVertMode = "tween",
+    WalkVerticalSpeed = 30, WalkVerticalSmoothness = 0.05,
+    WalkTweenDuration = 0.5, WalkTweenDelay = 0.1, WalkHorizontalRange = 25,
     ItemESP = false, PumpkinESP = false, ReaperESP = false, GhostESP = false,
     ShowDistance = false,
-
     FirePrompt = false, NoDelay = false,
-
     AntiAFK = false, AntiAFKInterval = 90,
-
     GodMode = false, DesyncRadius = 30, DesyncTPDistance = 500,
-
     Invisible = false, Noclip = false,
-
     Fly = false, FlySpeed = 80, FlyKey = Enum.KeyCode.F,
-
     WalkSpeedEnabled = false, WalkSpeedValue = 16,
+    -- Speedhack
+    SpeedhackEnabled = false,
+    SpeedhackValue = 60,
+    SpeedhackAntiDetect = true,
+    SpeedhackSpoofValue = 16,
 }
 
 local StatsData = {
     ItemsFound = 0, ItemsCollected = 0, ItemsAttempted = 0,
     PumpkinsFound = 0, PumpkinsCollected = 0, PumpkinsAttempted = 0,
     ReapersFound = 0, GhostsFound = 0, AFKTicks = 0, DesyncCount = 0,
-    VerticalSteps = 0,
+    VerticalSteps = 0, SpeedhackBlocked = 0,
 }
 
 local itemCache, pumpkinCache, reaperCache, ghostCache = {}, {}, {}, {}
 local countedItems, countedPumpkins = {}, {}
 
--- ═══════════════════════════════════════════════════════════
--- HELPERS
--- ═══════════════════════════════════════════════════════════
 local function getHRP()
     local c = LP.Character
     return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c:FindFirstChild("UpperTorso"))
@@ -156,109 +148,24 @@ local function safeTP(pos)
     return true
 end
 
-local function doAntiAFK()
-    pcall(function()
-        local vu = game:GetService("VirtualUser")
-        vu:CaptureController()
-        vu:ClickButton2(Vector2.new())
-        StatsData.AFKTicks += 1
-    end)
-end
-
-task.spawn(function()
-    while true do
-        task.wait(State.AntiAFKInterval)
-        if State.AntiAFK then doAntiAFK() end
-    end
-end)
-pcall(function()
-    LP.Idled:Connect(function() if State.AntiAFK then doAntiAFK() end end)
-end)
-
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        local c = LP.Character
-        if c then
-            for _, p in ipairs(c:GetChildren()) do
-                if p:IsA("BasePart") then
-                    if State.Invisible then
-                        p.LocalTransparencyModifier = 1
-                        p.Transparency = 1
-                    else
-                        p.LocalTransparencyModifier = 0
-                        p.Transparency = 0
-                    end
-                    if State.Noclip or State.Invisible or State.Fly or State.WalkNaturalEnabled then
-                        p.CanCollide = false
-                    else
-                        p.CanCollide = true
-                    end
-                end
-            end
-        end
-    end
-end)
-
--- FLY
-local flyBV, flyBG, flyConn
-local function stopFly()
-    if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
-    if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
-    if flyConn then pcall(function() flyConn:Disconnect() end) flyConn = nil end
-end
-local function startFly()
-    stopFly()
-    if not hasCharacter() then return end
-    local hrp, hum = getHRP(), getHum()
-    if not hrp or not hum then return end
-    flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    flyBV.Velocity = Vector3.zero
-    flyBV.Parent = hrp
-    flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    flyBG.P = 9e4; flyBG.D = 500; flyBG.CFrame = hrp.CFrame
-    flyBG.Parent = hrp
-    flyConn = RunService.RenderStepped:Connect(function()
-        if not State.Fly or not hasCharacter() then return end
-        local h, hm = getHRP(), getHum()
-        if not h or not hm then return end
-        local dir = Vector3.zero
-        if hm.MoveDirection.Magnitude > 0 then dir = hm.MoveDirection end
-        if UIS:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir + Vector3.new(0, -1, 0) end
-        if dir.Magnitude > 0 then dir = dir.Unit end
-        flyBV.Velocity = dir * State.FlySpeed
-        flyBG.CFrame = workspace.CurrentCamera.CFrame
-    end)
-end
-UIS.InputBegan:Connect(function(i, g)
-    if g then return end
-    if i.KeyCode == State.FlyKey then
-        State.Fly = not State.Fly
-        if State.Fly then startFly() else stopFly() end
-        NotifyUser("Fly", State.Fly and "ON" or "OFF", State.Fly and "success" or "info")
-    end
-end)
-LP.CharacterAdded:Connect(function()
-    task.wait(1)
-    if State.Fly then startFly() end
-end)
-
--- ANTI-DETECT
+-- ═══ ANTI-DETECT EXTENDED (Speedhack) ═══
 local AntiDetect = {
     Enabled = true, Running = false,
     ScriptsDisabled = 0, KicksBlocked = 0,
     RemotesBlocked = 0, MovementBlocked = 0,
+    SpeedBlocked = 0,
     MaxTPDistance = 80, MaxSpeed = 100,
     lastPos = nil, lastTime = nil,
 }
+
 local DETECT_KEYWORDS = {
     "detect","anticheat","anti_cheat","ac_","acscript","log","report",
     "flag","ban","kick","admin","cheat","hack","exploit","suspicious",
     "monitor","watch","sentry","guardian","speedcheck","positioncheck",
+    "speed","walkspeed","velocity","movement","sanic","speedhack","sprint",
+    "check","verify","warn","suspect","trace","audit",
 }
+
 local function isDetectionName(name)
     local low = tostring(name):lower()
     for _, kw in ipairs(DETECT_KEYWORDS) do
@@ -267,6 +174,92 @@ local function isDetectionName(name)
     return false
 end
 
+-- Speedhack bypass: block remote yang baca WalkSpeed / speed
+local SpeedhackBypass = {
+    Enabled = true,
+    HooksInstalled = false,
+}
+
+local function installSpeedhackBypass()
+    if SpeedhackBypass.HooksInstalled then return end
+    SpeedhackBypass.HooksInstalled = true
+
+    -- Hook __index untuk spoof WalkSpeed property (kalau AC baca client-side)
+    if type(hookmetamethod) == "function" then
+        pcall(function()
+            local oldIndex
+            oldIndex = hookmetamethod(game, "__index", function(self, key)
+                if State.SpeedhackAntiDetect and State.SpeedhackEnabled then
+                    if key == "WalkSpeed" then
+                        local ok, isHum = pcall(function() return self:IsA("Humanoid") end)
+                        if ok and isHum then
+                            local myChar = LP.Character
+                            if myChar then
+                                local h = myChar:FindFirstChildOfClass("Humanoid")
+                                if h == self then
+                                    return State.SpeedhackSpoofValue
+                                end
+                            end
+                        end
+                    end
+                end
+                return oldIndex(self, key)
+            end)
+        end)
+    end
+
+    -- Hook namecall untuk block remote speed check
+    if type(hookmetamethod) == "function" then
+        pcall(function()
+            local oldNamecall
+            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                local method = getnamecallmethod()
+                if method == "FireServer" or method == "InvokeServer" then
+                    local ok, name = pcall(function() return self:GetFullName() end)
+                    if ok and isDetectionName(name) then
+                        AntiDetect.RemotesBlocked += 1
+                        AntiDetect.SpeedBlocked += 1
+                        return
+                    end
+                end
+                if method == "Kick" and self == LP and AntiDetect.Enabled then
+                    AntiDetect.KicksBlocked += 1
+                    return
+                end
+                return oldNamecall(self, ...)
+            end)
+        end)
+    end
+
+    -- Auto-disconnect Touched checks untuk speedhack di NPC (kalau ada)
+    task.spawn(function()
+        while true do
+            task.wait(2)
+            if State.SpeedhackAntiDetect and State.SpeedhackEnabled then
+                pcall(function()
+                    if getconnections then
+                        for _, p in ipairs(workspace:GetDescendants()) do
+                            if p:IsA("BasePart") then
+                                local n = p.Name:lower()
+                                if n:find("check") or n:find("detect") or n:find("speed") then
+                                    for _, conn in ipairs(getconnections(p.Touched)) do
+                                        if conn.Disable then conn:Disable() end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+
+    print("[Oc1DvHUB] Speedhack bypass installed")
+end
+
+pcall(installSpeedhackBypass)
+
+-- Original Kick hook
 pcall(function()
     if type(hookfunction) == "function" then
         hookfunction(LP.Kick, function(self, ...)
@@ -274,29 +267,6 @@ pcall(function()
                 AntiDetect.KicksBlocked += 1
                 return
             end
-        end)
-    end
-end)
-
-pcall(function()
-    if type(hookmetamethod) == "function" then
-        local old
-        old = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod()
-            if AntiDetect.Enabled then
-                if method == "Kick" and self == LP then
-                    AntiDetect.KicksBlocked += 1
-                    return
-                end
-                if method == "FireServer" or method == "InvokeServer" then
-                    local ok, name = pcall(function() return self:GetFullName() end)
-                    if ok and isDetectionName(name) then
-                        AntiDetect.RemotesBlocked += 1
-                        return
-                    end
-                end
-            end
-            return old(self, ...)
         end)
     end
 end)
@@ -346,10 +316,12 @@ task.spawn(function()
             local deltaDist = (pos - AntiDetect.lastPos).Magnitude
             local deltaTime = now - AntiDetect.lastTime
             local speed = deltaTime > 0 and (deltaDist / deltaTime) or 0
+            -- Kalau speedhack aktif, MaxSpeed dinaikkan otomatis
+            local maxSpeed = State.SpeedhackEnabled and (State.SpeedhackValue * 1.5) or AntiDetect.MaxSpeed
             if deltaDist > AntiDetect.MaxTPDistance then
                 AntiDetect.MovementBlocked += 1
                 pcall(function() hrp.CFrame = CFrame.new(AntiDetect.lastPos) end)
-            elseif not State.Fly and speed > AntiDetect.MaxSpeed then
+            elseif not State.Fly and not State.SpeedhackEnabled and speed > maxSpeed then
                 AntiDetect.MovementBlocked += 1
                 pcall(function() hrp.CFrame = CFrame.new(AntiDetect.lastPos) end)
             end
@@ -364,9 +336,116 @@ pcall(function()
     if protect_gui then protect_gui(pg) end
 end)
 
--- ═══════════════════════════════════════════════════════════
--- KEYWORDS + SCAN (FIX: Exclude Keywords biar tidak tumpang tindih)
--- ═══════════════════════════════════════════════════════════
+-- Anti-AFK
+local function doAntiAFK()
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:ClickButton2(Vector2.new())
+        StatsData.AFKTicks += 1
+    end)
+end
+task.spawn(function()
+    while true do
+        task.wait(State.AntiAFKInterval)
+        if State.AntiAFK then doAntiAFK() end
+    end
+end)
+pcall(function()
+    LP.Idled:Connect(function() if State.AntiAFK then doAntiAFK() end end)
+end)
+
+-- Invisible/Noclip loop
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local c = LP.Character
+        if c then
+            for _, p in ipairs(c:GetChildren()) do
+                if p:IsA("BasePart") then
+                    if State.Invisible then
+                        p.LocalTransparencyModifier = 1
+                        p.Transparency = 1
+                    else
+                        p.LocalTransparencyModifier = 0
+                        p.Transparency = 0
+                    end
+                    if State.Noclip or State.Invisible or State.Fly or State.WalkNaturalEnabled then
+                        p.CanCollide = false
+                    else
+                        p.CanCollide = true
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Speedhack loop (kalau aktif, apply WalkSpeed terus)
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if State.SpeedhackEnabled then
+            local hum = getHum()
+            if hum then
+                pcall(function() hum.WalkSpeed = State.SpeedhackValue end)
+            end
+        elseif State.WalkSpeedEnabled then
+            local hum = getHum()
+            if hum and math.abs(hum.WalkSpeed - State.WalkSpeedValue) > 0.5 then
+                hum.WalkSpeed = State.WalkSpeedValue
+            end
+        end
+    end
+end)
+
+-- FLY
+local flyBV, flyBG, flyConn
+local function stopFly()
+    if flyBV then pcall(function() flyBV:Destroy() end) flyBV = nil end
+    if flyBG then pcall(function() flyBG:Destroy() end) flyBG = nil end
+    if flyConn then pcall(function() flyConn:Disconnect() end) flyConn = nil end
+end
+local function startFly()
+    stopFly()
+    if not hasCharacter() then return end
+    local hrp, hum = getHRP(), getHum()
+    if not hrp or not hum then return end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = hrp
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    flyBG.P = 9e4; flyBG.D = 500; flyBG.CFrame = hrp.CFrame
+    flyBG.Parent = hrp
+    flyConn = RunService.RenderStepped:Connect(function()
+        if not State.Fly or not hasCharacter() then return end
+        local h, hm = getHRP(), getHum()
+        if not h or not hm then return end
+        local dir = Vector3.zero
+        if hm.MoveDirection.Magnitude > 0 then dir = hm.MoveDirection end
+        if UIS:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+        if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir + Vector3.new(0, -1, 0) end
+        if dir.Magnitude > 0 then dir = dir.Unit end
+        flyBV.Velocity = dir * State.FlySpeed
+        flyBG.CFrame = workspace.CurrentCamera.CFrame
+    end)
+end
+UIS.InputBegan:Connect(function(i, g)
+    if g then return end
+    if i.KeyCode == State.FlyKey then
+        State.Fly = not State.Fly
+        if State.Fly then startFly() else stopFly() end
+        if NotifyUser then NotifyUser("Fly", State.Fly and "ON" or "OFF", State.Fly and "success" or "info") end
+    end
+end)
+LP.CharacterAdded:Connect(function()
+    task.wait(1)
+    if State.Fly then startFly() end
+end)
+
+-- Keywords scan
 local ITEM_KEYWORDS = {
     "trickortreatitem","trickortreat","trick_or_treat","trick","treat",
     "candy","candies","sweet","halloweenitem","eventitem","collectitem",
@@ -385,7 +464,6 @@ local PUMPKIN_BLACKLIST = {
     "particle","highlight","button","text","label","screen","folder","decal",
     "texture","mesh","light","beam","trail",
 }
-
 local function checkName(name, keywords, blacklist)
     local low = name:lower()
     for _, bl in ipairs(blacklist) do
@@ -396,7 +474,6 @@ local function checkName(name, keywords, blacklist)
     end
     return false
 end
-
 local function extractPart(obj)
     if not obj or not obj.Parent then return nil end
     if obj:IsA("BasePart") or obj:IsA("MeshPart") then return obj end
@@ -407,8 +484,6 @@ local function extractPart(obj)
     if obj:IsA("Folder") then return obj:FindFirstChildWhichIsA("BasePart", true) end
     return nil
 end
-
--- FIX: Tambah excludeKeywords untuk hindari cross-detection
 local function scanByKeyword(keywords, blacklist, excludeKeywords)
     local found, seen = {}, {}
     pcall(function()
@@ -416,9 +491,7 @@ local function scanByKeyword(keywords, blacklist, excludeKeywords)
             if not obj.Parent then continue end
             if seen[obj] then continue end
             if checkName(obj.Name, keywords, blacklist) then
-                if excludeKeywords and checkName(obj.Name, excludeKeywords, {}) then
-                    continue
-                end
+                if excludeKeywords and checkName(obj.Name, excludeKeywords, {}) then continue end
                 local part = extractPart(obj)
                 if part and part.Parent then
                     local root = part:FindFirstAncestorOfClass("Model") or obj
@@ -432,16 +505,8 @@ local function scanByKeyword(keywords, blacklist, excludeKeywords)
     end)
     return found
 end
-
--- FIX: Candy exclude pumpkin keywords, Pumpkin exclude candy keywords
-local function scanItems()
-    return scanByKeyword(ITEM_KEYWORDS, ITEM_BLACKLIST, PUMPKIN_KEYWORDS)
-end
-
-local function scanPumpkins()
-    return scanByKeyword(PUMPKIN_KEYWORDS, PUMPKIN_BLACKLIST, ITEM_KEYWORDS)
-end
-
+local function scanItems() return scanByKeyword(ITEM_KEYWORDS, ITEM_BLACKLIST, PUMPKIN_KEYWORDS) end
+local function scanPumpkins() return scanByKeyword(PUMPKIN_KEYWORDS, PUMPKIN_BLACKLIST, ITEM_KEYWORDS) end
 local function scanReapers()
     local found = {}
     pcall(function()
@@ -458,10 +523,8 @@ local function scanReapers()
     end)
     return found
 end
-
 local GHOST_KEYWORDS = {"ghost","hantu","spirit","phantom","wraith","soul","specter","spectre","haunt","poltergeist","banshee","revenant","demon","devil","monster","zombie","skeleton","skull","shadow","nightmare","undead","curse"}
 local GHOST_BLACKLIST = {"ghostbuster","ghost_shop","ghostsign","ghost_ui","soulmate","soul_shop","console","shining","souvenir"}
-
 local function scanGhosts()
     local found, seen = {}, {}
     pcall(function()
@@ -492,7 +555,6 @@ local function scanGhosts()
     return found
 end
 
--- SCAN CACHE
 local scanCache = { items = {}, pumpkins = {}, lastUpdate = 0 }
 local SCAN_CACHE_DURATION = 0.8
 local function refreshCache()
@@ -502,14 +564,8 @@ local function refreshCache()
         scanCache.lastUpdate = tick()
     end
 end
-local function getCachedItems()
-    refreshCache()
-    return scanCache.items
-end
-local function getCachedPumpkins()
-    refreshCache()
-    return scanCache.pumpkins
-end
+local function getCachedItems() refreshCache() return scanCache.items end
+local function getCachedPumpkins() refreshCache() return scanCache.pumpkins end
 
 -- WALK NATURAL
 local lastVertAction = 0
@@ -577,7 +633,6 @@ task.spawn(function()
     end
 end)
 
--- WALK TO TARGET
 local function walkToTarget(targetPart, timeout, speed)
     timeout = timeout or 120
     speed = speed or 32
@@ -598,9 +653,7 @@ local function walkToTarget(targetPart, timeout, speed)
         AgentCanJump = true, AgentCanClimb = true,
         WaypointSpacing = 8,
     })
-    local ok = pcall(function()
-        path:ComputeAsync(hrp.Position, targetPart.Position)
-    end)
+    local ok = pcall(function() path:ComputeAsync(hrp.Position, targetPart.Position) end)
     if ok and path.Status == Enum.PathStatus.Success then
         local waypoints = path:GetWaypoints()
         for _, wp in ipairs(waypoints) do
@@ -669,7 +722,6 @@ local function walkToTarget(targetPart, timeout, speed)
     return success
 end
 
--- GOD MODE
 task.spawn(function()
     while true do
         task.wait(0.3)
@@ -702,18 +754,6 @@ task.spawn(function()
     end
 end)
 
-task.spawn(function()
-    while true do
-        task.wait(0.5)
-        if State.WalkSpeedEnabled then
-            local hum = getHum()
-            if hum and math.abs(hum.WalkSpeed - State.WalkSpeedValue) > 0.5 then
-                hum.WalkSpeed = State.WalkSpeedValue
-            end
-        end
-    end
-end)
-
 local function forceNoDelayPrompt(obj)
     if obj:IsA("ProximityPrompt") and State.NoDelay then
         pcall(function()
@@ -735,7 +775,6 @@ workspace.DescendantAdded:Connect(function(obj)
     end
 end)
 
--- COLLECT ITEM (Reliable)
 local function collectItem(data)
     if not data or not data.part or not data.part.Parent then return false end
     local part, model = data.part, data.model
@@ -743,14 +782,12 @@ local function collectItem(data)
     if not hrp then return false end
     local dist = (part.Position - hrp.Position).Magnitude
     if dist > 15 then return false end
-
     local claimed = false
     local prompts = {}
     local pModel = model:FindFirstChildWhichIsA("ProximityPrompt", true)
     if pModel then table.insert(prompts, pModel) end
     local pPart = part:FindFirstChildWhichIsA("ProximityPrompt")
     if pPart and pPart ~= pModel then table.insert(prompts, pPart) end
-
     for _, prompt in ipairs(prompts) do
         pcall(function()
             prompt.MaxActivationDistance = 9e9
@@ -769,7 +806,6 @@ local function collectItem(data)
         end
         if claimed then break end
     end
-
     if not claimed then
         local cds = {}
         local cModel = model:FindFirstChildWhichIsA("ClickDetector", true)
@@ -790,7 +826,6 @@ local function collectItem(data)
             if claimed then break end
         end
     end
-
     if not claimed and firetouchinterest then
         for i = 1, 3 do
             pcall(function()
@@ -805,11 +840,9 @@ local function collectItem(data)
             end
         end
     end
-
     return claimed
 end
 
--- ESP
 local function createHL(model, color, name)
     if not model or not model.Parent then return end
     local e = model:FindFirstChild(name)
@@ -824,7 +857,6 @@ local function createHL(model, color, name)
     hl.Adornee = model
     hl.Parent = model
 end
-
 local function createTag(part, label, color, tagName)
     if not part or not part.Parent then return end
     local e = part:FindFirstChild(tagName)
@@ -858,7 +890,6 @@ local function createTag(part, label, color, tagName)
     dLbl.Font = Enum.Font.GothamBold
     bb.Parent = part
 end
-
 local function removeESP(model)
     if not model then return end
     for _, c in ipairs(model:GetChildren()) do
@@ -873,7 +904,6 @@ local function removeESP(model)
     end
 end
 
--- AUTO COLLECT CANDY (FIX: Statistik)
 task.spawn(function()
     while true do
         task.wait(State.CandyInterval)
@@ -898,23 +928,17 @@ task.spawn(function()
                         end
                     end
                     task.wait(0.15)
-
-                    -- Catat attempt
                     StatsData.ItemsAttempted += 1
-
-                    -- Coba claim 2x
                     local claimed = collectItem(d)
                     if not claimed then
                         task.wait(0.2)
                         claimed = collectItem(d)
                     end
-
-                    -- FIX: Cek benar-benar candy hilang dari map
                     if claimed and (not d.model.Parent) then
                         if not countedItems[d.model] then
                             countedItems[d.model] = true
                             StatsData.ItemsCollected += 1
-                            NotifyUser("Candy", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
+                            if NotifyUser then NotifyUser("Candy", "Collected! (" .. math.floor(d.dist) .. " studs)", "success") end
                         end
                         collected += 1
                         task.wait(0.2)
@@ -926,7 +950,6 @@ task.spawn(function()
     end
 end)
 
--- AUTO COLLECT PUMPKIN (FIX: Statistik terpisah)
 task.spawn(function()
     while true do
         task.wait(State.PumpkinInterval)
@@ -951,22 +974,17 @@ task.spawn(function()
                         end
                     end
                     task.wait(0.15)
-
-                    -- FIX: Pumpkin attempt terpisah
                     StatsData.PumpkinsAttempted += 1
-
                     local claimed = collectItem(d)
                     if not claimed then
                         task.wait(0.2)
                         claimed = collectItem(d)
                     end
-
-                    -- FIX: Cek benar-benar pumpkin hilang dari map
                     if claimed and (not d.model.Parent) then
                         if not countedPumpkins[d.model] then
                             countedPumpkins[d.model] = true
                             StatsData.PumpkinsCollected += 1
-                            NotifyUser("Pumpkin", "Collected! (" .. math.floor(d.dist) .. " studs)", "success")
+                            if NotifyUser then NotifyUser("Pumpkin", "Collected! (" .. math.floor(d.dist) .. " studs)", "success") end
                         end
                         collected += 1
                         task.wait(0.2)
@@ -978,7 +996,6 @@ task.spawn(function()
     end
 end)
 
--- FOUND COUNTER (tanpa spawn yang membingungkan)
 task.spawn(function()
     while true do
         task.wait(3)
@@ -986,16 +1003,11 @@ task.spawn(function()
         StatsData.ItemsFound = #items
         local pk = getCachedPumpkins()
         StatsData.PumpkinsFound = #pk
-        for m in pairs(countedItems) do
-            if not m.Parent then countedItems[m] = nil end
-        end
-        for m in pairs(countedPumpkins) do
-            if not m.Parent then countedPumpkins[m] = nil end
-        end
+        for m in pairs(countedItems) do if not m.Parent then countedItems[m] = nil end end
+        for m in pairs(countedPumpkins) do if not m.Parent then countedPumpkins[m] = nil end end
     end
 end)
 
--- ESP LOOP
 task.spawn(function()
     while true do
         task.wait(2)
@@ -1131,13 +1143,16 @@ local function getEventInfo()
 end
 
 -- ═══════════════════════════════════════════════════════════
--- UI
+-- UI BUILDING (wrap di pcall biar tidak block seluruh script)
 -- ═══════════════════════════════════════════════════════════
+print("[Oc1DvHUB] Building UI...")
+
 local SG = Instance.new("ScreenGui")
 SG.Name = "Oc1DvHUB_UI"
 SG.ResetOnSpawn = false
 SG.IgnoreGuiInset = true
 SG.Parent = pg
+print("[Oc1DvHUB] ScreenGui created and parented")
 
 local NotifyContainer = Instance.new("Frame")
 NotifyContainer.Size = UDim2.new(0, 300, 0, 400)
@@ -1222,6 +1237,7 @@ Main.ClipsDescendants = true
 Main.Active = true
 Main.Parent = SG
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0,18)
+print("[Oc1DvHUB] Main frame created")
 
 local bgI = Instance.new("ImageLabel", Main)
 bgI.Size = UDim2.new(1,0,1,0)
@@ -1345,16 +1361,9 @@ hGradNew.Color = ColorSequence.new({
 })
 hGradNew.Rotation = 30
 
-local logoTiny = Instance.new("ImageLabel", Title)
-logoTiny.Size = UDim2.new(0, 26, 0, 26)
-logoTiny.Position = UDim2.new(0, 10, 0.5, -13)
-logoTiny.BackgroundTransparency = 1
-logoTiny.Image = CONFIG.LOGO
-logoTiny.ZIndex = 22
-
 local Ttl = Instance.new("TextLabel", Title)
 Ttl.Size = UDim2.new(0, 250, 1, 0)
-Ttl.Position = UDim2.new(0, 42, 0, 0)
+Ttl.Position = UDim2.new(0, 16, 0, 0)
 Ttl.BackgroundTransparency = 1
 Ttl.RichText = true
 Ttl.Text = '<font color="rgb(255,255,255)">Oc1Dv</font><font color="rgb(255,145,80)">HUB</font>'
@@ -1375,8 +1384,6 @@ MinB.Font = Enum.Font.GothamBold
 MinB.AutoButtonColor = false
 MinB.ZIndex = 22
 Instance.new("UICorner", MinB).CornerRadius = UDim.new(0, 6)
-MinB.MouseEnter:Connect(function() TS:Create(MinB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(70, 70, 78)}):Play() end)
-MinB.MouseLeave:Connect(function() TS:Create(MinB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 58)}):Play() end)
 
 local ClsB = Instance.new("TextButton", Title)
 ClsB.Size = UDim2.new(0, 30, 0, 24)
@@ -1390,8 +1397,6 @@ ClsB.Font = Enum.Font.GothamBold
 ClsB.AutoButtonColor = false
 ClsB.ZIndex = 22
 Instance.new("UICorner", ClsB).CornerRadius = UDim.new(0, 6)
-ClsB.MouseEnter:Connect(function() TS:Create(ClsB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(200, 60, 60)}):Play() end)
-ClsB.MouseLeave:Connect(function() TS:Create(ClsB, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(50, 50, 58)}):Play() end)
 
 local FB = Instance.new("TextButton")
 FB.Size = UDim2.new(0,52,0,52)
@@ -1730,7 +1735,7 @@ local function Toggle(parent, title, initial, cb)
         knob.Position = state and UDim2.new(1,-22,0.5,-10) or UDim2.new(0,2,0.5,-10)
         bg.BackgroundColor3 = state and C.Grn or Color3.fromRGB(60,60,68)
         if cb then pcall(cb, state) end
-        if state then NotifyUser("Enabled", title, "success") end
+        if state and NotifyUser then NotifyUser("Enabled", title, "success") end
     end)
     return f
 end
@@ -1885,7 +1890,6 @@ uptimeLbl.Font = Enum.Font.Gotham
 uptimeLbl.TextXAlignment = Enum.TextXAlignment.Left; uptimeLbl.ZIndex = 12
 
 Sect(tr, "SERVER INFO")
-
 local infoCard = Instance.new("Frame", tr)
 infoCard.Size = UDim2.new(1,-4,0,116)
 infoCard.BackgroundColor3 = C.Card
@@ -1893,7 +1897,6 @@ infoCard.BackgroundTransparency = 0.25
 infoCard.BorderSizePixel = 0
 infoCard.ZIndex = 10
 Instance.new("UICorner", infoCard).CornerRadius = UDim.new(0,12)
-
 local function mkInfoRow(parent, y, label)
     local rL = Instance.new("TextLabel", parent)
     rL.Size = UDim2.new(0,110,0,20)
@@ -1918,7 +1921,6 @@ local function mkInfoRow(parent, y, label)
     vL.ZIndex = 12
     return vL
 end
-
 local jobVal = mkInfoRow(infoCard, 10, "Job ID")
 local placeVal = mkInfoRow(infoCard, 34, "Place ID")
 local gameVal = mkInfoRow(infoCard, 58, "Game")
@@ -1994,16 +1996,12 @@ end)
 
 -- FILL COLLECT
 local tcol = tabContent.COLLECT
-
-Sect(tcol, "═══ WALK NATURAL (VERTICAL) ═══")
+Sect(tcol, "═══ WALK NATURAL ═══")
 Toggle(tcol, "Enable Walk Natural", false, function(v)
     State.WalkNaturalEnabled = v
-    if v then NotifyUser("Walk Natural", "Noclip + Vertical aktif", "success") end
+    if v and NotifyUser then NotifyUser("Walk Natural", "Noclip + Vertical ON", "success") end
 end)
-Dropdown(tcol, "Vertical Method", {"tween", "step"}, State.WalkVertMode, function(v)
-    State.WalkVertMode = v
-    NotifyUser("Vertical Mode", v:upper(), "success")
-end)
+Dropdown(tcol, "Vertical Method", {"tween", "step"}, State.WalkVertMode, function(v) State.WalkVertMode = v end)
 Slider(tcol, "Tween Duration (ms)", 100, 2000, 500, function(v) State.WalkTweenDuration = v / 1000 end)
 Slider(tcol, "Tween Delay (ms)", 0, 500, 100, function(v) State.WalkTweenDelay = v / 1000 end)
 Slider(tcol, "Detect Range (stud)", 5, 60, 25, function(v) State.WalkHorizontalRange = v end)
@@ -2012,20 +2010,14 @@ Slider(tcol, "Step Smoothness (ms)", 10, 300, 50, function(v) State.WalkVertical
 
 Sect(tcol, "═══ AUTO COLLECT CANDY ═══")
 Toggle(tcol, "Auto Collect Candy", false, function(v) State.AutoCollectCandy = v end)
-Dropdown(tcol, "Candy Method", {"walk", "path"}, State.CandyMethod, function(v)
-    State.CandyMethod = v
-    NotifyUser("Candy Method", v:upper(), "success")
-end)
+Dropdown(tcol, "Candy Method", {"walk", "path"}, State.CandyMethod, function(v) State.CandyMethod = v end)
 Slider(tcol, "Candy Interval", 1, 10, 2, function(v) State.CandyInterval = v end)
 Slider(tcol, "Candy Walk Speed", 16, 80, 32, function(v) State.CandyWalkSpeed = v end)
 Slider(tcol, "Candy Timeout (s)", 30, 300, 120, function(v) State.CandyTimeout = v end)
 
 Sect(tcol, "═══ AUTO COLLECT PUMPKIN ═══")
 Toggle(tcol, "Auto Collect Pumpkin", false, function(v) State.AutoCollectPumpkin = v end)
-Dropdown(tcol, "Pumpkin Method", {"walk", "path"}, State.PumpkinMethod, function(v)
-    State.PumpkinMethod = v
-    NotifyUser("Pumpkin Method", v:upper(), "success")
-end)
+Dropdown(tcol, "Pumpkin Method", {"walk", "path"}, State.PumpkinMethod, function(v) State.PumpkinMethod = v end)
 Slider(tcol, "Pumpkin Interval", 1, 10, 2, function(v) State.PumpkinInterval = v end)
 
 Sect(tcol, "METHOD")
@@ -2129,7 +2121,6 @@ dateLbl2.TextXAlignment = Enum.TextXAlignment.Center
 dateLbl2.ZIndex = 11
 
 Sect(tEv, "STATISTIK")
-
 local function mkStatRow(parent, title, color)
     local bx = Instance.new("Frame", parent)
     bx.Size = UDim2.new(1,-4,0,40)
@@ -2163,6 +2154,7 @@ local statPumpkinAttVal = mkStatRow(tEv, "Pumpkin Attempts", C.Yel)
 local statPumpkinFoundVal = mkStatRow(tEv, "Pumpkin On Map", C.Pur)
 local statVertVal = mkStatRow(tEv, "Vertical Steps", C.Cyn)
 local statMoveBlock = mkStatRow(tEv, "Movement Block", C.Red)
+local statSpeedBlock = mkStatRow(tEv, "Speedhack Block", C.Yel)
 
 task.spawn(function()
     while SG.Parent do
@@ -2193,6 +2185,7 @@ task.spawn(function()
             statPumpkinFoundVal.Text = tostring(StatsData.PumpkinsFound)
             statVertVal.Text = tostring(StatsData.VerticalSteps)
             statMoveBlock.Text = tostring(AntiDetect.MovementBlocked)
+            statSpeedBlock.Text = tostring(AntiDetect.SpeedBlocked)
         end)
     end
 end)
@@ -2202,10 +2195,26 @@ local tm = tabContent.MISC
 Sect(tm, "ANTI-DETECT SYSTEM")
 Toggle(tm, "Enable Anti-Detect", false, function(v)
     AntiDetect.Enabled = v
-    NotifyUser("Anti-Detect", v and "ON" or "OFF", v and "success" or "warn")
+    if NotifyUser then NotifyUser("Anti-Detect", v and "ON" or "OFF", v and "success" or "warn") end
+end)
+Toggle(tm, "Anti Speedhack Detect", true, function(v)
+    State.SpeedhackAntiDetect = v
+    if NotifyUser then NotifyUser("Speedhack AC", v and "ON" or "OFF", v and "success" or "warn") end
 end)
 Slider(tm, "Max TP Distance", 10, 200, 80, function(v) AntiDetect.MaxTPDistance = v end)
 Slider(tm, "Max Speed (stud/s)", 20, 200, 100, function(v) AntiDetect.MaxSpeed = v end)
+
+Sect(tm, "SPEEDHACK")
+Toggle(tm, "Enable Speedhack", false, function(v)
+    State.SpeedhackEnabled = v
+    if not v then
+        local hum = getHum()
+        if hum then pcall(function() hum.WalkSpeed = 16 end) end
+    end
+end)
+Slider(tm, "Speedhack Value", 30, 200, 60, function(v)
+    State.SpeedhackValue = v
+end)
 
 Sect(tm, "WALKSPEED")
 Toggle(tm, "Enable WalkSpeed", false, function(v)
@@ -2217,13 +2226,9 @@ Toggle(tm, "Enable WalkSpeed", false, function(v)
 end)
 Slider(tm, "Speed", 16, 200, 16, function(v)
     State.WalkSpeedValue = v
-    if State.WalkSpeedEnabled then
-        local hum = getHum()
-        if hum then hum.WalkSpeed = v end
-    end
 end)
 
-Sect(tm, "NOCLIP (Manual)")
+Sect(tm, "NOCLIP")
 Toggle(tm, "Noclip", false, function(v) State.Noclip = v end)
 
 Sect(tm, "INVISIBLE")
@@ -2491,7 +2496,7 @@ local function mkSocBtn(name, handle, color, url)
     b.MouseButton1Click:Connect(function()
         sfx()
         if setclipboard then setclipboard(url) end
-        NotifyUser(name, "Link copied!", "success")
+        if NotifyUser then NotifyUser(name, "Link copied!", "success") end
     end)
 end
 
@@ -2507,6 +2512,6 @@ UIS.InputBegan:Connect(function(i, g)
     end
 end)
 
-Log("FINAL V9 loaded", "success")
-NotifyUser("Oc1DvHUB", "FINAL V9 loaded!", "success")
-print("[Oc1DvHUB] FINAL V9 loaded ✅")
+print("[Oc1DvHUB] UI fully loaded")
+Log("V9.1 loaded", "success")
+NotifyUser("Oc1DvHUB", "V9.1 loaded! Speedhack AC + UI Fix", "success")
